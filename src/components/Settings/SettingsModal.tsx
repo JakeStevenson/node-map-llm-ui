@@ -15,9 +15,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     availableModels,
     isLoadingModels,
     modelsError,
-    setEndpoint,
-    setApiKey,
     setModel,
+    updateConfig,
     setAvailableModels,
     setIsLoadingModels,
     setModelsError,
@@ -64,8 +63,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
 
   // Handle save
   const handleSave = () => {
-    setEndpoint(localEndpoint);
-    setApiKey(localApiKey);
+    updateConfig({
+      endpoint: localEndpoint,
+      apiKey: localApiKey,
+    });
     onClose();
   };
 

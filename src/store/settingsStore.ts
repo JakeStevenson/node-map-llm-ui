@@ -17,6 +17,7 @@ interface SettingsState {
   setEndpoint: (endpoint: string) => void;
   setApiKey: (apiKey: string) => void;
   setModel: (model: string) => void;
+  updateConfig: (config: Partial<Pick<SettingsState, 'endpoint' | 'apiKey' | 'model'>>) => void;
   setAvailableModels: (models: LLMModel[]) => void;
   setIsLoadingModels: (loading: boolean) => void;
   setModelsError: (error: string | null) => void;
@@ -37,9 +38,16 @@ export const useSettingsStore = create<SettingsState>()(
       modelsError: null,
 
       // Actions
-      setEndpoint: (endpoint) => set({ endpoint, availableModels: [], model: '' }),
+      setEndpoint: (endpoint) => {
+        const current = get().endpoint;
+        if (endpoint !== current) {
+          // Only clear model/models if endpoint actually changed
+          set({ endpoint, availableModels: [], model: '' });
+        }
+      },
       setApiKey: (apiKey) => set({ apiKey }),
       setModel: (model) => set({ model }),
+      updateConfig: (config) => set(config),
       setAvailableModels: (models) => set({ availableModels: models }),
       setIsLoadingModels: (loading) => set({ isLoadingModels: loading }),
       setModelsError: (error) => set({ modelsError: error }),
