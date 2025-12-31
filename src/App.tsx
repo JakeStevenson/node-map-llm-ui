@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { CanvasView } from './components/Canvas';
 import { ChatSidebar } from './components/ChatSidebar';
+import { SettingsModal } from './components/Settings';
 
 const MIN_VIEWPORT_WIDTH = 1024;
 
@@ -24,6 +25,7 @@ export default function App(): JSX.Element {
   const [isDesktop, setIsDesktop] = useState<boolean>(
     typeof window !== 'undefined' ? window.innerWidth >= MIN_VIEWPORT_WIDTH : true
   );
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   useEffect(() => {
     const handleResize = (): void => {
@@ -34,19 +36,44 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Keyboard shortcut for settings (Cmd+,)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+        e.preventDefault();
+        setIsSettingsOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setIsSettingsOpen(true);
+  }, []);
+
+  const handleCloseSettings = useCallback(() => {
+    setIsSettingsOpen(false);
+  }, []);
+
   if (!isDesktop) {
     return <DesktopRequiredMessage />;
   }
 
   return (
-    <div className="h-full flex">
-      {/* Sidebar - Fixed 320px */}
-      <ChatSidebar className="w-80 flex-shrink-0" />
+    <>
+      <div className="h-full flex">
+        {/* Sidebar - Fixed 320px */}
+        <ChatSidebar className="w-80 flex-shrink-0" onOpenSettings={handleOpenSettings} />
 
-      {/* Canvas - Flexible */}
-      <main className="flex-1 h-full">
-        <CanvasView />
-      </main>
-    </div>
+        {/* Canvas - Flexible */}
+        <main className="flex-1 h-full">
+          <CanvasView />
+        </main>
+      </div>
+
+      {/* Settings Modal */}
+      <SettingsModal isOpen={isSettingsOpen} onClose={handleCloseSettings} />
+    </>
   );
 }
