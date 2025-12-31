@@ -26,6 +26,7 @@ export function ChatSidebar({ className = '', onOpenSettings }: ChatSidebarProps
     appendStreamingContent,
     finalizeStreaming,
     setError,
+    clearTree,
   } = useConversationStore();
 
   const { endpoint, apiKey, model } = useSettingsStore();
@@ -118,14 +119,27 @@ export function ChatSidebar({ className = '', onOpenSettings }: ChatSidebarProps
         <h1 className="text-lg font-semibold text-[var(--color-text-primary)]">
           Node-Map LLM UI
         </h1>
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)] rounded-lg transition-colors"
-          aria-label="Open settings"
-        >
-          <SettingsIcon />
-        </button>
+        <div className="flex items-center gap-1">
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={clearTree}
+              className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-error)] hover:bg-[var(--color-background)] rounded-lg transition-colors"
+              aria-label="Clear conversation"
+              title="Clear conversation"
+            >
+              <TrashIcon />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)] rounded-lg transition-colors"
+            aria-label="Open settings"
+          >
+            <SettingsIcon />
+          </button>
+        </div>
       </header>
 
       {/* Config Warning */}
@@ -176,8 +190,18 @@ export function ChatSidebar({ className = '', onOpenSettings }: ChatSidebarProps
 
         {/* Error message */}
         {error && (
-          <div className="p-3 bg-[var(--color-error)]/10 border border-[var(--color-error)]/20 rounded-lg">
+          <div className="p-3 bg-[var(--color-error)]/10 border border-[var(--color-error)]/20 rounded-lg flex items-start justify-between gap-2">
             <p className="text-sm text-[var(--color-error)]">{error}</p>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="text-[var(--color-error)] hover:text-[var(--color-error)]/70 flex-shrink-0"
+              aria-label="Dismiss error"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         )}
 
@@ -279,6 +303,27 @@ function SettingsIcon(): JSX.Element {
     >
       <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+// Trash icon
+function TrashIcon(): JSX.Element {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
     </svg>
   );
 }

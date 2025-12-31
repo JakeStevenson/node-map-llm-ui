@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { Message, ConversationNode } from '../types';
 
 interface ConversationState {
@@ -79,15 +80,17 @@ const getPathToNodeHelper = (
   return path;
 };
 
-export const useConversationStore = create<ConversationState>((set, get) => ({
-  nodes: [],
-  activeNodeId: null,
-  selectedNodeId: null,
-  messages: [],
-  isStreaming: false,
-  streamingContent: '',
-  streamingParentId: null,
-  error: null,
+export const useConversationStore = create<ConversationState>()(
+  persist(
+    (set, get) => ({
+      nodes: [],
+      activeNodeId: null,
+      selectedNodeId: null,
+      messages: [],
+      isStreaming: false,
+      streamingContent: '',
+      streamingParentId: null,
+      error: null,
 
   // Add a node to the tree
   addNode: (role, content, parentId) => {
@@ -221,7 +224,24 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     if (!activeNodeId) return [];
     return getPathToNodeHelper(activeNodeId, nodes);
   },
-}));
+    }),
+    {
+      name: 'node-map-conversation',
+      partialize: (state) => ({
+        nodes: state.nodes,
+        activeNodeId: state.activeNodeId,
+      }),
+      onRehydrateStorage: () => (state) => {
+        // Rebuild messages from restored nodes
+        if (state && state.activeNodeId && state.nodes.length > 0) {
+          const path = getPathToNodeHelper(state.activeNodeId, state.nodes);
+          state.messages = buildMessagesFromPath(path);
+          state.selectedNodeId = state.activeNodeId;
+        }
+      },
+    }
+  )
+);
 
 // Helper to create a user message
 export const createUserMessage = (content: string): Message => ({
