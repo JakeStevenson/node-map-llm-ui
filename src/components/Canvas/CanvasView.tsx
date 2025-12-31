@@ -54,4 +54,3 @@ export function CanvasView(): JSX.Element {
   );
 }
 
-export default CanvasView;

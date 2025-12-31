@@ -44,4 +44,3 @@ export function ChatSidebar({ className = '' }: ChatSidebarProps): JSX.Element {
   );
 }
 
-export default ChatSidebar;
