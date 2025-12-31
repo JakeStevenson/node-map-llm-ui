@@ -242,16 +242,16 @@ function MessageBubble({
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
+        className={`max-w-[85%] px-3 py-2 rounded-lg text-sm overflow-hidden ${
           isUser
-            ? 'bg-[var(--color-accent)] text-white whitespace-pre-wrap'
+            ? 'bg-[var(--color-accent)] text-white whitespace-pre-wrap break-words'
             : 'bg-[var(--color-background)] text-[var(--color-text-primary)] border border-[var(--color-border)]'
         }`}
       >
         {isUser ? (
           content
         ) : (
-          <div className="prose prose-sm prose-invert max-w-none prose-pre:bg-[var(--color-surface)] prose-pre:border prose-pre:border-[var(--color-border)] prose-code:text-[var(--color-accent)] prose-code:before:content-none prose-code:after:content-none">
+          <div className="prose prose-sm prose-invert max-w-none overflow-x-auto prose-pre:bg-[var(--color-surface)] prose-pre:border prose-pre:border-[var(--color-border)] prose-pre:overflow-x-auto prose-code:text-[var(--color-accent)] prose-code:before:content-none prose-code:after:content-none prose-p:break-words prose-li:break-words">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
         )}

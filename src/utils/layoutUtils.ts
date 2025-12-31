@@ -11,10 +11,10 @@ interface LayoutOptions {
 
 const DEFAULT_OPTIONS: Required<LayoutOptions> = {
   direction: 'TB', // Top to bottom (vertical tree)
-  nodeWidth: 200,
+  nodeWidth: 180, // Match ConversationNode width
   nodeHeight: 100, // Increased for multi-line content
   rankSep: 50, // Vertical spacing between ranks
-  nodeSep: 40, // Horizontal spacing between nodes
+  nodeSep: 30, // Horizontal spacing between nodes
 };
 
 /**

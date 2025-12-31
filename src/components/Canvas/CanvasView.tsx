@@ -57,8 +57,19 @@ function CanvasViewInner(): JSX.Element {
       return { nodes: [], edges: [] };
     }
 
+    // Sort nodes by creation time for stable Dagre layout
+    const sortedNodes = [...conversationNodes].sort((a, b) => a.createdAt - b.createdAt);
+
+    // Calculate child count for each node
+    const childCounts = new Map<string, number>();
+    sortedNodes.forEach((node) => {
+      if (node.parentId) {
+        childCounts.set(node.parentId, (childCounts.get(node.parentId) || 0) + 1);
+      }
+    });
+
     // Create React Flow nodes
-    const flowNodes: ConversationNodeType[] = conversationNodes.map((node) => ({
+    const flowNodes: ConversationNodeType[] = sortedNodes.map((node) => ({
       id: node.id,
       type: 'conversation' as const,
       position: { x: 0, y: 0 }, // Will be set by Dagre
@@ -67,11 +78,12 @@ function CanvasViewInner(): JSX.Element {
         content: node.content,
         isActive: node.id === activeNodeId,
         isOnActivePath: activePathIds.has(node.id),
+        childCount: childCounts.get(node.id) || 0,
       } as ConversationNodeData,
     }));
 
-    // Create edges from parent relationships
-    const flowEdges: Edge[] = conversationNodes
+    // Create edges from parent relationships (sorted for stable layout)
+    const flowEdges: Edge[] = sortedNodes
       .filter((node) => node.parentId !== null)
       .map((node) => ({
         id: `e-${node.parentId}-${node.id}`,
@@ -126,7 +138,9 @@ function CanvasViewInner(): JSX.Element {
       >
         <Background color="var(--color-border)" gap={16} />
         <Controls
-          className="!bg-[var(--color-surface)] !border-[var(--color-border)] !shadow-md"
+          showZoom={true}
+          showFitView={false}
+          showInteractive={false}
         />
       </ReactFlow>
 

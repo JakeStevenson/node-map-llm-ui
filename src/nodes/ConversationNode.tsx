@@ -6,13 +6,16 @@ export interface ConversationNodeData extends Record<string, unknown> {
   content: string;
   isActive: boolean;
   isOnActivePath: boolean;
+  childCount: number;
 }
 
 export type ConversationNodeType = Node<ConversationNodeData, 'conversation'>;
 
 function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNodeType>): JSX.Element {
-  const { role, content, isActive, isOnActivePath } = data;
+  const { role, content, isActive, isOnActivePath, childCount } = data;
   const isUser = role === 'user';
+  const hasBranches = childCount > 1;
+  const hasChildren = childCount > 0;
 
   // Truncate long content for display (keep short to prevent layout issues)
   const displayContent = content.length > 60
@@ -30,7 +33,7 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
 
       <div
         className={`
-          px-3 py-2 rounded-lg min-w-[120px] max-w-[200px] text-sm
+          px-3 py-2 rounded-lg w-[180px] text-sm
           transition-all duration-150 cursor-pointer
           ${isUser
             ? 'bg-[var(--color-accent)] text-white'
@@ -58,10 +61,25 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
         </div>
 
         {/* Content preview */}
-        <div className="whitespace-pre-wrap break-words leading-snug line-clamp-3">
+        <div className="break-words leading-snug line-clamp-3">
           {displayContent}
         </div>
       </div>
+
+      {/* Branch indicator badge */}
+      {hasBranches && (
+        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 translate-y-full flex items-center gap-0.5 px-1.5 py-0.5 bg-[var(--color-accent)] text-white text-[10px] font-medium rounded-full">
+          <BranchIcon />
+          <span>{childCount}</span>
+        </div>
+      )}
+
+      {/* Branch hint when selected on a node with children */}
+      {selected && hasChildren && !isActive && (
+        <div className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-1 bg-[var(--color-surface)] text-[var(--color-text-secondary)] text-[10px] rounded border border-[var(--color-border)] shadow-sm">
+          Type to branch from here
+        </div>
+      )}
 
       {/* Output handle (bottom) */}
       <Handle
@@ -74,3 +92,24 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
 }
 
 export const ConversationNode = memo(ConversationNodeComponent);
+
+// Branch icon (git branch style)
+function BranchIcon(): JSX.Element {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  );
+}
