@@ -2,18 +2,26 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Message, ConversationNode } from '../types';
 
-interface ConversationState {
-  // Tree structure - all nodes in the conversation tree
+// Chat type for managing multiple conversations
+interface Chat {
+  id: string;
+  name: string;
   nodes: ConversationNode[];
-
-  // Active node - where we are in the conversation (latest message in current path)
   activeNodeId: string | null;
+  createdAt: number;
+}
 
-  // Selected node - for canvas selection (may differ from active)
+interface ConversationState {
+  // Multi-chat management
+  chats: Chat[];
+  activeChatId: string | null;
+
+  // Current chat state (derived from active chat)
+  nodes: ConversationNode[];
+  activeNodeId: string | null;
   selectedNodeId: string | null;
-
-  // Messages in current path (linear view for sidebar, derived from activeNodeId)
   messages: Message[];
+  chatName: string;
 
   // Streaming state
   isStreaming: boolean;
@@ -22,6 +30,12 @@ interface ConversationState {
 
   // Error state
   error: string | null;
+
+  // Chat management actions
+  createChat: (name?: string) => void;
+  switchChat: (chatId: string) => void;
+  deleteChat: (chatId: string) => void;
+  renameChat: (name: string) => void;
 
   // Tree Actions
   addNode: (role: 'user' | 'assistant', content: string, parentId: string | null) => string;
@@ -80,163 +94,382 @@ const getPathToNodeHelper = (
   return path;
 };
 
+// Helper to create a new chat
+const createNewChat = (name: string = 'Untitled'): Chat => ({
+  id: generateId(),
+  name,
+  nodes: [],
+  activeNodeId: null,
+  createdAt: Date.now(),
+});
+
+// Helper to save current state back to chats array
+const saveCurrentChatToChats = (
+  chats: Chat[],
+  activeChatId: string | null,
+  nodes: ConversationNode[],
+  activeNodeId: string | null,
+  chatName: string
+): Chat[] => {
+  if (!activeChatId) return chats;
+
+  return chats.map((chat) =>
+    chat.id === activeChatId
+      ? { ...chat, nodes, activeNodeId, name: chatName }
+      : chat
+  );
+};
+
 export const useConversationStore = create<ConversationState>()(
   persist(
     (set, get) => ({
+      // Initialize with one default chat
+      chats: [],
+      activeChatId: null,
       nodes: [],
       activeNodeId: null,
       selectedNodeId: null,
       messages: [],
+      chatName: 'Untitled',
       isStreaming: false,
       streamingContent: '',
       streamingParentId: null,
       error: null,
 
-  // Add a node to the tree
-  addNode: (role, content, parentId) => {
-    const id = generateId();
-    const node: ConversationNode = {
-      id,
-      parentId,
-      role,
-      content,
-      createdAt: Date.now(),
-      treeId: 'main', // Single tree for now
-    };
+      // Create a new chat
+      createChat: (name = 'Untitled') => {
+        const { chats, activeChatId, nodes, activeNodeId, chatName } = get();
 
-    const { nodes } = get();
-    const newNodes = [...nodes, node];
-    const path = getPathToNodeHelper(id, newNodes);
+        // Save current chat first
+        const updatedChats = saveCurrentChatToChats(chats, activeChatId, nodes, activeNodeId, chatName);
 
-    set({
-      nodes: newNodes,
-      activeNodeId: id,
-      selectedNodeId: id,
-      messages: buildMessagesFromPath(path),
-      error: null,
-    });
+        // Create new chat
+        const newChat = createNewChat(name);
 
-    return id;
-  },
+        set({
+          chats: [...updatedChats, newChat],
+          activeChatId: newChat.id,
+          nodes: [],
+          activeNodeId: null,
+          selectedNodeId: null,
+          messages: [],
+          chatName: name,
+          error: null,
+        });
+      },
 
-  // Select a node (for canvas highlighting)
-  selectNode: (nodeId) => {
-    set({ selectedNodeId: nodeId });
-  },
+      // Switch to a different chat
+      switchChat: (chatId) => {
+        const { chats, activeChatId, nodes, activeNodeId, chatName } = get();
 
-  // Navigate to a node (change active conversation path)
-  navigateToNode: (nodeId) => {
-    const { nodes } = get();
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) return;
+        const targetChat = chats.find((c) => c.id === chatId);
+        if (!targetChat) return;
 
-    const path = getPathToNodeHelper(nodeId, nodes);
-    set({
-      activeNodeId: nodeId,
-      selectedNodeId: nodeId,
-      messages: buildMessagesFromPath(path),
-    });
-  },
+        // Save current chat first
+        const updatedChats = saveCurrentChatToChats(chats, activeChatId, nodes, activeNodeId, chatName);
 
-  // Clear the entire tree
-  clearTree: () => {
-    set({
-      nodes: [],
-      activeNodeId: null,
-      selectedNodeId: null,
-      messages: [],
-      error: null,
-    });
-  },
+        // Load target chat
+        const path = targetChat.activeNodeId
+          ? getPathToNodeHelper(targetChat.activeNodeId, targetChat.nodes)
+          : [];
 
-  // Legacy: Add message (creates node in tree)
-  addMessage: (message) => {
-    const { activeNodeId } = get();
-    get().addNode(message.role as 'user' | 'assistant', message.content, activeNodeId);
-  },
+        set({
+          chats: updatedChats,
+          activeChatId: chatId,
+          nodes: targetChat.nodes,
+          activeNodeId: targetChat.activeNodeId,
+          selectedNodeId: targetChat.activeNodeId,
+          messages: buildMessagesFromPath(path),
+          chatName: targetChat.name,
+          error: null,
+        });
+      },
 
-  updateLastMessage: (content) =>
-    set((state) => {
-      const messages = [...state.messages];
-      if (messages.length > 0) {
-        messages[messages.length - 1] = {
-          ...messages[messages.length - 1],
-          content,
-        };
-      }
-      // Also update the node in tree
-      const nodes = [...state.nodes];
-      if (state.activeNodeId) {
-        const idx = nodes.findIndex((n) => n.id === state.activeNodeId);
-        if (idx !== -1) {
-          nodes[idx] = { ...nodes[idx], content };
+      // Delete a chat
+      deleteChat: (chatId) => {
+        const { chats, activeChatId } = get();
+
+        const updatedChats = chats.filter((c) => c.id !== chatId);
+
+        // If deleting active chat, switch to another or create new
+        if (chatId === activeChatId) {
+          if (updatedChats.length > 0) {
+            const newActive = updatedChats[0];
+            const path = newActive.activeNodeId
+              ? getPathToNodeHelper(newActive.activeNodeId, newActive.nodes)
+              : [];
+
+            set({
+              chats: updatedChats,
+              activeChatId: newActive.id,
+              nodes: newActive.nodes,
+              activeNodeId: newActive.activeNodeId,
+              selectedNodeId: newActive.activeNodeId,
+              messages: buildMessagesFromPath(path),
+              chatName: newActive.name,
+            });
+          } else {
+            // No chats left, create a new one
+            const newChat = createNewChat();
+            set({
+              chats: [newChat],
+              activeChatId: newChat.id,
+              nodes: [],
+              activeNodeId: null,
+              selectedNodeId: null,
+              messages: [],
+              chatName: 'Untitled',
+            });
+          }
+        } else {
+          set({ chats: updatedChats });
         }
-      }
-      return { messages, nodes };
-    }),
+      },
 
-  setMessages: (messages) => set({ messages }),
+      // Rename current chat
+      renameChat: (name) => {
+        const { chats, activeChatId } = get();
 
-  clearMessages: () => {
-    get().clearTree();
-  },
+        const updatedChats = chats.map((chat) =>
+          chat.id === activeChatId ? { ...chat, name } : chat
+        );
 
-  setIsStreaming: (streaming) => {
-    const { activeNodeId } = get();
-    set({
-      isStreaming: streaming,
-      streamingParentId: streaming ? activeNodeId : null,
-    });
-  },
+        set({ chats: updatedChats, chatName: name });
+      },
 
-  setStreamingContent: (content) => set({ streamingContent: content }),
+      // Add a node to the tree
+      addNode: (role, content, parentId) => {
+        const id = generateId();
+        const node: ConversationNode = {
+          id,
+          parentId,
+          role,
+          content,
+          createdAt: Date.now(),
+          treeId: 'main',
+        };
 
-  appendStreamingContent: (chunk) =>
-    set((state) => ({
-      streamingContent: state.streamingContent + chunk,
-    })),
+        const { nodes, chats, activeChatId, chatName } = get();
 
-  finalizeStreaming: () => {
-    const { streamingContent, streamingParentId } = get();
-    if (streamingContent) {
-      get().addNode('assistant', streamingContent, streamingParentId);
-      set({
-        streamingContent: '',
-        isStreaming: false,
-        streamingParentId: null,
-      });
-    } else {
-      set({ isStreaming: false, streamingContent: '', streamingParentId: null });
-    }
-  },
+        // If no active chat, create one
+        if (!activeChatId) {
+          const newChat = createNewChat();
+          newChat.nodes = [node];
+          newChat.activeNodeId = id;
 
-  setError: (error) => set({ error, isStreaming: false }),
+          const path = getPathToNodeHelper(id, [node]);
 
-  // Get path from root to any node
-  getPathToNode: (nodeId) => {
-    const { nodes } = get();
-    return getPathToNodeHelper(nodeId, nodes);
-  },
+          set({
+            chats: [newChat],
+            activeChatId: newChat.id,
+            nodes: [node],
+            activeNodeId: id,
+            selectedNodeId: id,
+            messages: buildMessagesFromPath(path),
+            chatName: newChat.name,
+            error: null,
+          });
 
-  // Get path from root to active node
-  getActivePath: () => {
-    const { activeNodeId, nodes } = get();
-    if (!activeNodeId) return [];
-    return getPathToNodeHelper(activeNodeId, nodes);
-  },
+          return id;
+        }
+
+        const newNodes = [...nodes, node];
+        const path = getPathToNodeHelper(id, newNodes);
+
+        // Update chats array with new node
+        const updatedChats = chats.map((chat) =>
+          chat.id === activeChatId
+            ? { ...chat, nodes: newNodes, activeNodeId: id, name: chatName }
+            : chat
+        );
+
+        set({
+          chats: updatedChats,
+          nodes: newNodes,
+          activeNodeId: id,
+          selectedNodeId: id,
+          messages: buildMessagesFromPath(path),
+          error: null,
+        });
+
+        return id;
+      },
+
+      // Select a node (for canvas highlighting)
+      selectNode: (nodeId) => {
+        set({ selectedNodeId: nodeId });
+      },
+
+      // Navigate to a node (change active conversation path)
+      navigateToNode: (nodeId) => {
+        const { nodes, chats, activeChatId, chatName } = get();
+        const node = nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+
+        const path = getPathToNodeHelper(nodeId, nodes);
+
+        // Update chats array
+        const updatedChats = chats.map((chat) =>
+          chat.id === activeChatId
+            ? { ...chat, activeNodeId: nodeId, name: chatName }
+            : chat
+        );
+
+        set({
+          chats: updatedChats,
+          activeNodeId: nodeId,
+          selectedNodeId: nodeId,
+          messages: buildMessagesFromPath(path),
+        });
+      },
+
+      // Clear the entire tree (current chat only)
+      clearTree: () => {
+        const { chats, activeChatId, chatName } = get();
+
+        const updatedChats = chats.map((chat) =>
+          chat.id === activeChatId
+            ? { ...chat, nodes: [], activeNodeId: null, name: chatName }
+            : chat
+        );
+
+        set({
+          chats: updatedChats,
+          nodes: [],
+          activeNodeId: null,
+          selectedNodeId: null,
+          messages: [],
+          error: null,
+        });
+      },
+
+      // Legacy: Add message (creates node in tree)
+      addMessage: (message) => {
+        const { activeNodeId } = get();
+        get().addNode(message.role as 'user' | 'assistant', message.content, activeNodeId);
+      },
+
+      updateLastMessage: (content) =>
+        set((state) => {
+          const messages = [...state.messages];
+          if (messages.length > 0) {
+            messages[messages.length - 1] = {
+              ...messages[messages.length - 1],
+              content,
+            };
+          }
+          // Also update the node in tree
+          const nodes = [...state.nodes];
+          if (state.activeNodeId) {
+            const idx = nodes.findIndex((n) => n.id === state.activeNodeId);
+            if (idx !== -1) {
+              nodes[idx] = { ...nodes[idx], content };
+            }
+          }
+
+          // Update in chats
+          const chats = state.chats.map((chat) =>
+            chat.id === state.activeChatId
+              ? { ...chat, nodes }
+              : chat
+          );
+
+          return { messages, nodes, chats };
+        }),
+
+      setMessages: (messages) => set({ messages }),
+
+      clearMessages: () => {
+        get().clearTree();
+      },
+
+      setIsStreaming: (streaming) => {
+        const { activeNodeId } = get();
+        set({
+          isStreaming: streaming,
+          streamingParentId: streaming ? activeNodeId : null,
+        });
+      },
+
+      setStreamingContent: (content) => set({ streamingContent: content }),
+
+      appendStreamingContent: (chunk) =>
+        set((state) => ({
+          streamingContent: state.streamingContent + chunk,
+        })),
+
+      finalizeStreaming: () => {
+        const { streamingContent, streamingParentId } = get();
+        if (streamingContent) {
+          get().addNode('assistant', streamingContent, streamingParentId);
+          set({
+            streamingContent: '',
+            isStreaming: false,
+            streamingParentId: null,
+          });
+        } else {
+          set({ isStreaming: false, streamingContent: '', streamingParentId: null });
+        }
+      },
+
+      setError: (error) => set({ error, isStreaming: false }),
+
+      // Get path from root to any node
+      getPathToNode: (nodeId) => {
+        const { nodes } = get();
+        return getPathToNodeHelper(nodeId, nodes);
+      },
+
+      // Get path from root to active node
+      getActivePath: () => {
+        const { activeNodeId, nodes } = get();
+        if (!activeNodeId) return [];
+        return getPathToNodeHelper(activeNodeId, nodes);
+      },
     }),
     {
       name: 'node-map-conversation',
       partialize: (state) => ({
-        nodes: state.nodes,
-        activeNodeId: state.activeNodeId,
+        chats: state.chats,
+        activeChatId: state.activeChatId,
       }),
       onRehydrateStorage: () => (state) => {
-        // Rebuild messages from restored nodes
-        if (state && state.activeNodeId && state.nodes.length > 0) {
-          const path = getPathToNodeHelper(state.activeNodeId, state.nodes);
-          state.messages = buildMessagesFromPath(path);
-          state.selectedNodeId = state.activeNodeId;
+        if (!state) return;
+
+        // If no chats, create default one
+        if (state.chats.length === 0) {
+          const newChat = createNewChat();
+          state.chats = [newChat];
+          state.activeChatId = newChat.id;
+          state.chatName = 'Untitled';
+          return;
+        }
+
+        // Load active chat
+        const activeChat = state.chats.find((c) => c.id === state.activeChatId);
+        if (activeChat) {
+          state.nodes = activeChat.nodes;
+          state.activeNodeId = activeChat.activeNodeId;
+          state.selectedNodeId = activeChat.activeNodeId;
+          state.chatName = activeChat.name;
+
+          if (activeChat.activeNodeId) {
+            const path = getPathToNodeHelper(activeChat.activeNodeId, activeChat.nodes);
+            state.messages = buildMessagesFromPath(path);
+          }
+        } else if (state.chats.length > 0) {
+          // Active chat not found, use first chat
+          const firstChat = state.chats[0];
+          state.activeChatId = firstChat.id;
+          state.nodes = firstChat.nodes;
+          state.activeNodeId = firstChat.activeNodeId;
+          state.selectedNodeId = firstChat.activeNodeId;
+          state.chatName = firstChat.name;
+
+          if (firstChat.activeNodeId) {
+            const path = getPathToNodeHelper(firstChat.activeNodeId, firstChat.nodes);
+            state.messages = buildMessagesFromPath(path);
+          }
         }
       },
     }

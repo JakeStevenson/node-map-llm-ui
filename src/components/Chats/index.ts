@@ -1,0 +1,1 @@
+export { ChatsModal } from './ChatsModal';

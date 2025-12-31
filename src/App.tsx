@@ -1,9 +1,26 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { CanvasView } from './components/Canvas';
 import { ChatSidebar } from './components/ChatSidebar';
 import { SettingsModal } from './components/Settings';
+import { ChatsModal } from './components/Chats';
 
 const MIN_VIEWPORT_WIDTH = 1024;
+const MIN_SIDEBAR_WIDTH = 280;
+const MAX_SIDEBAR_WIDTH = 600;
+const DEFAULT_SIDEBAR_WIDTH = 320;
+
+// Load saved width from localStorage
+const getSavedSidebarWidth = (): number => {
+  if (typeof window === 'undefined') return DEFAULT_SIDEBAR_WIDTH;
+  const saved = localStorage.getItem('sidebar-width');
+  if (saved) {
+    const width = parseInt(saved, 10);
+    if (!isNaN(width) && width >= MIN_SIDEBAR_WIDTH && width <= MAX_SIDEBAR_WIDTH) {
+      return width;
+    }
+  }
+  return DEFAULT_SIDEBAR_WIDTH;
+};
 
 function DesktopRequiredMessage(): JSX.Element {
   return (
@@ -26,6 +43,10 @@ export default function App(): JSX.Element {
     typeof window !== 'undefined' ? window.innerWidth >= MIN_VIEWPORT_WIDTH : true
   );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isChatsOpen, setIsChatsOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
     const handleResize = (): void => {
@@ -35,6 +56,41 @@ export default function App(): JSX.Element {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Handle sidebar resize
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    resizeRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const delta = e.clientX - resizeRef.current.startX;
+      const newWidth = Math.min(
+        MAX_SIDEBAR_WIDTH,
+        Math.max(MIN_SIDEBAR_WIDTH, resizeRef.current.startWidth + delta)
+      );
+      setSidebarWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      // Save to localStorage
+      localStorage.setItem('sidebar-width', sidebarWidth.toString());
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, sidebarWidth]);
 
   // Keyboard shortcut for settings (Cmd+,)
   useEffect(() => {
@@ -56,24 +112,51 @@ export default function App(): JSX.Element {
     setIsSettingsOpen(false);
   }, []);
 
+  const handleOpenChats = useCallback(() => {
+    setIsChatsOpen(true);
+  }, []);
+
+  const handleCloseChats = useCallback(() => {
+    setIsChatsOpen(false);
+  }, []);
+
   if (!isDesktop) {
     return <DesktopRequiredMessage />;
   }
 
   return (
     <>
-      <div className="h-full flex">
-        {/* Sidebar - Fixed 320px */}
-        <ChatSidebar className="w-80 flex-shrink-0" onOpenSettings={handleOpenSettings} />
+      <div className={`h-full flex ${isResizing ? 'select-none' : ''}`}>
+        {/* Sidebar - Resizable */}
+        <ChatSidebar
+          style={{ width: sidebarWidth }}
+          className="flex-shrink-0"
+          onOpenSettings={handleOpenSettings}
+          onOpenChats={handleOpenChats}
+        />
+
+        {/* Resize Handle */}
+        <div
+          onMouseDown={handleResizeStart}
+          className={`w-1 flex-shrink-0 cursor-col-resize hover:bg-[var(--color-accent)]/50 active:bg-[var(--color-accent)] transition-colors ${
+            isResizing ? 'bg-[var(--color-accent)]' : 'bg-transparent'
+          }`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+        />
 
         {/* Canvas - Flexible */}
-        <main className="flex-1 h-full">
+        <main className="flex-1 h-full min-w-0">
           <CanvasView />
         </main>
       </div>
 
       {/* Settings Modal */}
       <SettingsModal isOpen={isSettingsOpen} onClose={handleCloseSettings} />
+
+      {/* Chats Modal */}
+      <ChatsModal isOpen={isChatsOpen} onClose={handleCloseChats} />
     </>
   );
 }

@@ -7,26 +7,33 @@ import { sendMessage } from '../../services/llmService';
 
 interface ChatSidebarProps {
   className?: string;
+  style?: React.CSSProperties;
   onOpenSettings: () => void;
+  onOpenChats: () => void;
 }
 
-export function ChatSidebar({ className = '', onOpenSettings }: ChatSidebarProps): JSX.Element {
+export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats }: ChatSidebarProps): JSX.Element {
   const [input, setInput] = useState('');
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const {
     messages,
     isStreaming,
     streamingContent,
     error,
+    chatName,
     addMessage,
     setIsStreaming,
     appendStreamingContent,
     finalizeStreaming,
     setError,
     clearTree,
+    renameChat,
   } = useConversationStore();
 
   const { endpoint, apiKey, model } = useSettingsStore();
@@ -49,6 +56,38 @@ export function ChatSidebar({ className = '', onOpenSettings }: ChatSidebarProps
       textareaRef.current?.focus();
     }
   }, [isStreaming, isConfigured]);
+
+  // Focus name input when editing starts
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
+    }
+  }, [isEditingName]);
+
+  // Handle starting name edit
+  const handleStartEditName = () => {
+    setEditedName(chatName);
+    setIsEditingName(true);
+  };
+
+  // Handle saving name
+  const handleSaveName = () => {
+    const trimmed = editedName.trim();
+    if (trimmed) {
+      renameChat(trimmed);
+    }
+    setIsEditingName(false);
+  };
+
+  // Handle name input key press
+  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSaveName();
+    } else if (e.key === 'Escape') {
+      setIsEditingName(false);
+    }
+  };
 
   // Handle send message
   const handleSend = useCallback(async () => {
@@ -113,13 +152,41 @@ export function ChatSidebar({ className = '', onOpenSettings }: ChatSidebarProps
   return (
     <aside
       className={`flex flex-col h-full bg-[var(--color-surface)] border-r border-[var(--color-border)] ${className}`}
+      style={style}
     >
       {/* Header */}
-      <header className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-[var(--color-text-primary)]">
-          Node-Map LLM UI
-        </h1>
-        <div className="flex items-center gap-1">
+      <header className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between gap-2">
+        {/* Editable chat name */}
+        {isEditingName ? (
+          <input
+            ref={nameInputRef}
+            type="text"
+            value={editedName}
+            onChange={(e) => setEditedName(e.target.value)}
+            onBlur={handleSaveName}
+            onKeyDown={handleNameKeyDown}
+            className="flex-1 min-w-0 text-lg font-semibold text-[var(--color-text-primary)] bg-transparent border-b-2 border-[var(--color-accent)] outline-none"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={handleStartEditName}
+            className="flex-1 min-w-0 text-left text-lg font-semibold text-[var(--color-text-primary)] hover:text-[var(--color-accent)] truncate transition-colors"
+            title="Click to rename"
+          >
+            {chatName}
+          </button>
+        )}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            type="button"
+            onClick={onOpenChats}
+            className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)] rounded-lg transition-colors"
+            aria-label="Open chats"
+            title="Saved chats"
+          >
+            <FolderIcon />
+          </button>
           {messages.length > 0 && (
             <button
               type="button"
@@ -324,6 +391,25 @@ function TrashIcon(): JSX.Element {
       <path d="M3 6h18" />
       <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
       <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    </svg>
+  );
+}
+
+// Folder icon
+function FolderIcon(): JSX.Element {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
     </svg>
   );
 }
