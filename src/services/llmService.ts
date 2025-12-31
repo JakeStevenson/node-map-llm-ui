@@ -180,3 +180,141 @@ function isLLMError(error: unknown): error is LLMError {
     'message' in error
   );
 }
+
+// Generate a summary of a conversation branch (non-streaming)
+export async function generateBranchSummary(
+  config: LLMConfig,
+  messages: Message[]
+): Promise<string> {
+  const { endpoint, apiKey, model } = config;
+  console.log('[Summary] Config:', { endpoint, model, hasApiKey: !!apiKey, messageCount: messages.length });
+
+  // Helper to create fallback summary from messages
+  const getFallbackSummary = (): string => {
+    const firstUser = messages.find((m) => m.role === 'user');
+    if (firstUser && firstUser.content.trim()) {
+      const content = firstUser.content.trim();
+      return content.length > 100 ? content.substring(0, 97) + '...' : content;
+    }
+    return 'Conversation branch';
+  };
+
+  if (!endpoint || !model || messages.length === 0) {
+    return getFallbackSummary();
+  }
+
+  const url = `${endpoint.replace(/\/$/, '')}/chat/completions`;
+
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  // Build conversation context for summary
+  const conversationText = messages
+    .filter((m) => m.content.trim())
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n\n');
+
+  if (!conversationText) {
+    return getFallbackSummary();
+  }
+
+  const summaryPrompt = {
+    role: 'user',
+    content: `Summarize this conversation in 1-2 short sentences (max 150 characters total). Focus on the main topic. Be very concise.
+
+${conversationText}
+
+Summary:`,
+  };
+
+  const requestBody = {
+    model,
+    messages: [summaryPrompt],
+    stream: false,
+    max_tokens: 200,
+    // Disable reasoning/thinking for efficiency (simple summarization task)
+    reasoning_effort: 'none',      // OpenAI o1/o3
+    enable_thinking: false,        // DeepSeek
+    think: false,                  // Alternative DeepSeek param
+  };
+
+  const body = JSON.stringify(requestBody);
+
+  try {
+    console.log('[Summary] Calling API:', url);
+    console.log('[Summary] Request body:', requestBody);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Summary] API error:', response.status, errorText);
+      return getFallbackSummary();
+    }
+
+    const data = await response.json();
+    console.log('[Summary] API response:', JSON.stringify(data, null, 2));
+
+    // Handle multiple response formats (OpenAI, Ollama, LM Studio, reasoning models, etc.)
+    let summary: string | undefined;
+    const message = data.choices?.[0]?.message;
+
+    // OpenAI format: data.choices[0].message.content
+    if (message?.content) {
+      summary = message.content.trim();
+    }
+    // Reasoning models (DeepSeek R1, etc.): content may be empty, summary might be in reasoning
+    // Try to extract the actual summary from the reasoning text
+    else if (message?.reasoning) {
+      // Look for patterns like "Summary:" or quoted text in reasoning
+      const reasoning = message.reasoning as string;
+      // Try to find a quoted summary
+      const quotedMatch = reasoning.match(/"([^"]{10,150})"/);
+      if (quotedMatch) {
+        summary = quotedMatch[1].trim();
+      } else {
+        // Use last sentence-like chunk as fallback (often the conclusion)
+        const sentences = reasoning.split(/[.!?]\s+/);
+        const lastMeaningful = sentences.filter(s => s.length > 20).pop();
+        if (lastMeaningful) {
+          summary = lastMeaningful.trim().substring(0, 150);
+        }
+      }
+    }
+    // Ollama format: data.message.content
+    else if (data.message?.content) {
+      summary = data.message.content.trim();
+    }
+    // Alternative: data.content
+    else if (data.content) {
+      summary = (typeof data.content === 'string' ? data.content : String(data.content)).trim();
+    }
+    // Ollama generate format: data.response
+    else if (data.response) {
+      summary = data.response.trim();
+    }
+
+    console.log('[Summary] Extracted summary:', summary);
+
+    // If we got a valid summary, use it (truncated if needed)
+    if (summary && summary.length > 0) {
+      console.log('[Summary] Using LLM summary');
+      return summary.length > 150 ? summary.substring(0, 147) + '...' : summary;
+    }
+
+    // Empty response from API, use fallback
+    console.warn('[Summary] Empty response, using fallback');
+    return getFallbackSummary();
+  } catch (err) {
+    console.error('[Summary] Generation error:', err);
+    return getFallbackSummary();
+  }
+}

@@ -3,7 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConversationStore, createUserMessage } from '../../store/conversationStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { sendMessage } from '../../services/llmService';
+import { sendMessage, generateBranchSummary } from '../../services/llmService';
+import type { BranchSummary } from '../../types';
 
 interface ChatSidebarProps {
   className?: string;
@@ -16,6 +17,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
   const [input, setInput] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState('');
+  const [isMerging, setIsMerging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -27,14 +29,29 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     streamingContent,
     error,
     chatName,
+    selectedNodeIds,
+    nodes,
+    activeNodeId,
     addMessage,
+    createMergeNode,
     setIsStreaming,
     appendStreamingContent,
     finalizeStreaming,
     setError,
     clearTree,
     renameChat,
+    clearNodeSelection,
+    getMessagesForLLM,
+    getMessagesForNode,
+    navigateToNode,
+    validateMerge,
   } = useConversationStore();
+
+  // Get active node to check for merge summaries
+  const activeNode = nodes.find((n) => n.id === activeNodeId);
+  const branchSummaries = activeNode?.branchSummaries;
+
+  const showMergeBar = selectedNodeIds.length >= 2;
 
   const { endpoint, apiKey, model } = useSettingsStore();
 
@@ -106,8 +123,8 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     // Create abort controller
     abortControllerRef.current = new AbortController();
 
-    // Get all messages including the new one
-    const allMessages = [...messages, userMessage];
+    // Get full context for LLM (handles merge nodes with multiple parents)
+    const allMessages = getMessagesForLLM();
 
     await sendMessage(
       { endpoint, apiKey, model },
@@ -124,7 +141,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     endpoint,
     apiKey,
     model,
-    messages,
+    getMessagesForLLM,
     addMessage,
     setIsStreaming,
     appendStreamingContent,
@@ -148,6 +165,43 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
       handleSend();
     }
   };
+
+  // Handle merge branches with summary generation
+  const handleMerge = useCallback(async () => {
+    if (selectedNodeIds.length < 2 || isMerging) return;
+
+    // Validate merge first
+    const validation = validateMerge(selectedNodeIds);
+    if (!validation.valid) {
+      setError(validation.error || 'Invalid merge');
+      return;
+    }
+
+    setIsMerging(true);
+
+    try {
+      // Generate summaries for each parent branch in parallel
+      const summaryPromises = selectedNodeIds.map(async (nodeId): Promise<BranchSummary> => {
+        const messages = getMessagesForNode(nodeId);
+        console.log(`[Merge] Node ${nodeId} has ${messages.length} messages:`, messages);
+        const summary = await generateBranchSummary({ endpoint, apiKey, model }, messages);
+        console.log(`[Merge] Summary for node ${nodeId}:`, summary);
+        return { nodeId, summary };
+      });
+
+      const branchSummaries = await Promise.all(summaryPromises);
+      console.log('[Merge] All summaries:', branchSummaries);
+
+      // Create merge node with summaries
+      createMergeNode(selectedNodeIds, branchSummaries);
+    } catch (err) {
+      console.error('Error generating summaries:', err);
+      // Still create merge node without summaries on error
+      createMergeNode(selectedNodeIds);
+    } finally {
+      setIsMerging(false);
+    }
+  }, [selectedNodeIds, isMerging, validateMerge, setError, getMessagesForNode, endpoint, apiKey, model, createMergeNode]);
 
   return (
     <aside
@@ -227,10 +281,44 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
 
       {/* Message List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && !streamingContent && (
+        {messages.length === 0 && !streamingContent && !branchSummaries && (
           <p className="text-sm text-[var(--color-text-secondary)]">
             Start a conversation...
           </p>
+        )}
+
+        {/* Branch Summary Cards (for merge nodes) */}
+        {branchSummaries && branchSummaries.length > 0 && (
+          <div className="space-y-2 mb-4">
+            <p className="text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wide">
+              Merged Branches
+            </p>
+            {branchSummaries.map((summary, index) => (
+              <button
+                key={summary.nodeId}
+                type="button"
+                onClick={() => navigateToNode(summary.nodeId)}
+                className="w-full text-left p-3 rounded-lg bg-amber-400/10 border border-amber-400/30 hover:bg-amber-400/20 transition-colors group"
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-500 mt-0.5">
+                    <BranchIcon />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">
+                      Branch {index + 1}
+                    </p>
+                    <p className="text-sm text-[var(--color-text-primary)] line-clamp-2">
+                      {summary.summary || 'No summary available'}
+                    </p>
+                  </div>
+                  <span className="text-[var(--color-text-secondary)] opacity-0 group-hover:opacity-100 transition-opacity text-xs">
+                    View →
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
         )}
 
         {messages.map((message) => (
@@ -274,6 +362,42 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Merge Bar - shows when 2+ nodes selected */}
+      {showMergeBar && (
+        <div className="px-4 py-3 bg-amber-400/10 border-t border-amber-400/30 flex items-center justify-between">
+          <span className="text-sm text-amber-600 dark:text-amber-400 font-medium">
+            {selectedNodeIds.length} nodes selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={clearNodeSelection}
+              className="px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)] rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleMerge}
+              disabled={isMerging}
+              className="px-3 py-1.5 text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-wait rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              {isMerging ? (
+                <>
+                  <LoadingSpinner />
+                  Generating summaries...
+                </>
+              ) : (
+                <>
+                  <MergeIcon />
+                  Merge Branches
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input Area */}
       <div className="p-4 border-t border-[var(--color-border)]">
@@ -410,6 +534,67 @@ function FolderIcon(): JSX.Element {
       strokeLinejoin="round"
     >
       <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    </svg>
+  );
+}
+
+// Merge icon (git merge style)
+function MergeIcon(): JSX.Element {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M6 21V9a9 9 0 0 0 9 9" />
+    </svg>
+  );
+}
+
+// Loading spinner
+function LoadingSpinner(): JSX.Element {
+  return (
+    <svg
+      className="animate-spin"
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+// Branch icon (for summary cards)
+function BranchIcon(): JSX.Element {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
     </svg>
   );
 }

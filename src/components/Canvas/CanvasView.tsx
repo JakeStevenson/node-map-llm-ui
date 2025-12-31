@@ -5,6 +5,7 @@ import {
   Controls,
   useReactFlow,
   ReactFlowProvider,
+  useOnSelectionChange,
   type Node,
   type Edge,
 } from '@xyflow/react';
@@ -17,32 +18,50 @@ import { useConversationStore } from '../../store/conversationStore';
 import { getLayoutedElements } from '../../utils/layoutUtils';
 
 function CanvasViewInner(): JSX.Element {
-  const { fitView } = useReactFlow();
-  const prevActiveNodeIdRef = useRef<string | null>(null);
+  const { setCenter, getZoom } = useReactFlow();
+  const prevNodeCountRef = useRef<number>(0);
 
   const {
     nodes: conversationNodes,
     activeNodeId,
+    selectedNodeIds,
     selectNode,
+    toggleNodeSelection,
+    clearNodeSelection,
     navigateToNode,
     getPathToNode,
   } = useConversationStore();
 
-  // Auto-pan to new active node when it changes (e.g., new message added)
-  useEffect(() => {
-    if (activeNodeId && activeNodeId !== prevActiveNodeIdRef.current) {
-      prevActiveNodeIdRef.current = activeNodeId;
+  // Sync React Flow's selection with our store (for Ctrl+click / box select)
+  useOnSelectionChange({
+    onChange: ({ nodes: selectedNodes }) => {
+      // When React Flow's selection changes, update our store
+      // This handles Ctrl+click, Cmd+click, and box selection
+      if (selectedNodes.length >= 2) {
+        // Multiple nodes selected via React Flow - sync to our store
+        const newSelectedIds = selectedNodes.map((n) => n.id);
+        // Only update if different from current selection
+        if (newSelectedIds.length !== selectedNodeIds.length ||
+            !newSelectedIds.every((id) => selectedNodeIds.includes(id))) {
+          // Clear and set new selection
+          clearNodeSelection();
+          newSelectedIds.forEach((id) => toggleNodeSelection(id));
+        }
+      }
+    },
+  });
 
-      // Small delay to let layout settle
-      setTimeout(() => {
-        fitView({
-          nodes: [{ id: activeNodeId }],
-          duration: 300,
-          padding: 0.5,
-        });
-      }, 100);
-    }
-  }, [activeNodeId, fitView]);
+  // ESC key clears multi-select
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedNodeIds.length > 0) {
+        clearNodeSelection();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNodeIds.length, clearNodeSelection]);
 
   // Build active path for highlighting
   const activePathIds = useMemo(() => {
@@ -60,11 +79,11 @@ function CanvasViewInner(): JSX.Element {
     // Sort nodes by creation time for stable Dagre layout
     const sortedNodes = [...conversationNodes].sort((a, b) => a.createdAt - b.createdAt);
 
-    // Calculate child count for each node
+    // Calculate child count for each node (count edges from all parents)
     const childCounts = new Map<string, number>();
     sortedNodes.forEach((node) => {
-      if (node.parentId) {
-        childCounts.set(node.parentId, (childCounts.get(node.parentId) || 0) + 1);
+      for (const parentId of node.parentIds) {
+        childCounts.set(parentId, (childCounts.get(parentId) || 0) + 1);
       }
     });
 
@@ -78,42 +97,63 @@ function CanvasViewInner(): JSX.Element {
         content: node.content,
         isActive: node.id === activeNodeId,
         isOnActivePath: activePathIds.has(node.id),
+        isSelected: selectedNodeIds.includes(node.id),
         childCount: childCounts.get(node.id) || 0,
       } as ConversationNodeData,
     }));
 
-    // Create edges from parent relationships (sorted for stable layout)
-    const flowEdges: Edge[] = sortedNodes
-      .filter((node) => node.parentId !== null)
-      .map((node) => ({
-        id: `e-${node.parentId}-${node.id}`,
-        source: node.parentId!,
+    // Create edges from parent relationships (DAG support: one edge per parent)
+    const flowEdges: Edge[] = sortedNodes.flatMap((node) =>
+      node.parentIds.map((parentId) => ({
+        id: `e-${parentId}-${node.id}`,
+        source: parentId,
         target: node.id,
-        className: activePathIds.has(node.id) && activePathIds.has(node.parentId!)
+        className: activePathIds.has(node.id) && activePathIds.has(parentId)
           ? 'stroke-[var(--color-accent)]'
           : 'stroke-[var(--color-border)] opacity-50',
-      }));
+      }))
+    );
 
     // Apply Dagre layout
     return getLayoutedElements(flowNodes, flowEdges);
-  }, [conversationNodes, activeNodeId, activePathIds]);
+  }, [conversationNodes, activeNodeId, activePathIds, selectedNodeIds]);
 
-  // Handle node click - select and navigate
-  const onNodeClick = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
-      selectNode(node.id);
-      navigateToNode(node.id);
+  // Auto-pan only when NEW nodes are added (not when navigating to existing nodes)
+  // Preserves current zoom level
+  useEffect(() => {
+    const currentCount = conversationNodes.length;
+    const isNewNode = currentCount > prevNodeCountRef.current;
+    prevNodeCountRef.current = currentCount;
 
-      // Fit view to center on selected node
+    if (isNewNode && activeNodeId) {
+      // Small delay to let layout settle, then pan to node without changing zoom
       setTimeout(() => {
-        fitView({
-          nodes: [{ id: node.id }],
-          duration: 300,
-          padding: 0.5,
-        });
-      }, 50);
+        const node = nodes.find((n) => n.id === activeNodeId);
+        if (node) {
+          const currentZoom = getZoom();
+          // Center on node (account for node size ~180x80)
+          setCenter(node.position.x + 90, node.position.y + 40, {
+            zoom: currentZoom,
+            duration: 300,
+          });
+        }
+      }, 100);
+    }
+  }, [conversationNodes.length, activeNodeId, nodes, setCenter, getZoom]);
+
+  // Handle node click - select and navigate (shift-click for multi-select)
+  const onNodeClick = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      if (event.shiftKey) {
+        // Shift-click: toggle multi-selection (don't navigate)
+        toggleNodeSelection(node.id);
+      } else {
+        // Regular click: single select + navigate (no viewport change)
+        selectNode(node.id);
+        navigateToNode(node.id);
+      }
     },
-    [selectNode, navigateToNode, fitView]
+    [selectNode, toggleNodeSelection, navigateToNode]
   );
 
   // Handle background click - deselect

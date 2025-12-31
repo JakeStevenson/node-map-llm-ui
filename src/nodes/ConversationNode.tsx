@@ -6,13 +6,14 @@ export interface ConversationNodeData extends Record<string, unknown> {
   content: string;
   isActive: boolean;
   isOnActivePath: boolean;
+  isSelected: boolean;  // Multi-select for merge feature
   childCount: number;
 }
 
 export type ConversationNodeType = Node<ConversationNodeData, 'conversation'>;
 
 function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNodeType>): JSX.Element {
-  const { role, content, isActive, isOnActivePath, childCount } = data;
+  const { role, content, isActive, isOnActivePath, isSelected, childCount } = data;
   const isUser = role === 'user';
   const hasBranches = childCount > 1;
   const hasChildren = childCount > 0;
@@ -39,15 +40,15 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
             ? 'bg-[var(--color-accent)] text-white'
             : 'bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border)]'
           }
-          ${isActive
+          ${isSelected
+            ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-[var(--color-background)]'
+            : isActive
             ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--color-background)]'
             : ''
           }
-          ${isOnActivePath && !isActive
+          ${isSelected || isOnActivePath || isActive
             ? 'opacity-100'
-            : !isOnActivePath
-            ? 'opacity-50'
-            : ''
+            : 'opacity-50'
           }
           ${selected
             ? 'shadow-lg scale-105'

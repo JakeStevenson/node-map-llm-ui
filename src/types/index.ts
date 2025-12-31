@@ -19,14 +19,21 @@ export interface Message {
   createdAt: number;
 }
 
-// Conversation Node for tree structure
+// Branch summary for merge nodes
+export interface BranchSummary {
+  nodeId: string;
+  summary: string;
+}
+
+// Conversation Node for DAG structure (supports merge)
 export interface ConversationNode {
   id: string;
-  parentId: string | null;
+  parentIds: string[];  // Empty for root, one for regular, multiple for merge nodes
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
   treeId: string;
+  branchSummaries?: BranchSummary[];  // Only present on merge nodes
 }
 
 // Streaming Types

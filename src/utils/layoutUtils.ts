@@ -72,10 +72,11 @@ export function getLayoutedElements<T extends Node>(
 
 /**
  * Get the path from root to a specific node.
+ * For merge nodes (multiple parents), follows first parent only.
  */
 export function getPathToNode(
   nodeId: string,
-  nodes: Array<{ id: string; parentId: string | null }>
+  nodes: Array<{ id: string; parentIds: string[] }>
 ): string[] {
   const path: string[] = [];
   let currentId: string | null = nodeId;
@@ -83,7 +84,7 @@ export function getPathToNode(
   while (currentId) {
     path.unshift(currentId);
     const node = nodes.find((n) => n.id === currentId);
-    currentId = node?.parentId ?? null;
+    currentId = node?.parentIds[0] ?? null;
   }
 
   return path;
@@ -91,21 +92,27 @@ export function getPathToNode(
 
 /**
  * Get all ancestor IDs for a node.
+ * For merge nodes, collects ancestors from ALL parent paths.
  */
 export function getAncestorIds(
   nodeId: string,
-  nodes: Array<{ id: string; parentId: string | null }>
+  nodes: Array<{ id: string; parentIds: string[] }>
 ): Set<string> {
   const ancestors = new Set<string>();
-  let currentId: string | null = nodeId;
+  const toVisit: string[] = [nodeId];
+  const visited = new Set<string>();
 
-  while (currentId) {
+  while (toVisit.length > 0) {
+    const currentId = toVisit.pop()!;
+    if (visited.has(currentId)) continue;
+    visited.add(currentId);
+
     const node = nodes.find((n) => n.id === currentId);
-    if (node?.parentId) {
-      ancestors.add(node.parentId);
-      currentId = node.parentId;
-    } else {
-      break;
+    if (node) {
+      for (const parentId of node.parentIds) {
+        ancestors.add(parentId);
+        toVisit.push(parentId);
+      }
     }
   }
 

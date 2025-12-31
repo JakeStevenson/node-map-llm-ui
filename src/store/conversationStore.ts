@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Message, ConversationNode } from '../types';
+import type { Message, ConversationNode, BranchSummary } from '../types';
 
 // Chat type for managing multiple conversations
 interface Chat {
@@ -20,6 +20,7 @@ interface ConversationState {
   nodes: ConversationNode[];
   activeNodeId: string | null;
   selectedNodeId: string | null;
+  selectedNodeIds: string[];  // Multi-select for merge feature
   messages: Message[];
   chatName: string;
 
@@ -39,7 +40,10 @@ interface ConversationState {
 
   // Tree Actions
   addNode: (role: 'user' | 'assistant', content: string, parentId: string | null) => string;
+  createMergeNode: (parentIds: string[], branchSummaries?: BranchSummary[]) => string | null;  // Create node with multiple parents
   selectNode: (nodeId: string | null) => void;
+  toggleNodeSelection: (nodeId: string) => void;  // For shift-click multi-select
+  clearNodeSelection: () => void;
   navigateToNode: (nodeId: string) => void;
   clearTree: () => void;
 
@@ -57,6 +61,9 @@ interface ConversationState {
   // Computed helpers
   getPathToNode: (nodeId: string) => ConversationNode[];
   getActivePath: () => ConversationNode[];
+  getMessagesForLLM: () => Message[];  // Full context including all merge branches
+  getMessagesForNode: (nodeId: string) => Message[];  // Get messages for a specific node path
+  validateMerge: (nodeIds: string[]) => { valid: boolean; error?: string };  // Validate merge before attempting
 }
 
 const generateId = (): string => {
@@ -74,6 +81,8 @@ const buildMessagesFromPath = (path: ConversationNode[]): Message[] => {
 };
 
 // Helper to get path from root to a node
+// For regular nodes (single parent), follows the first parent
+// For merge nodes, this returns path to first parent only - full context building handled separately
 const getPathToNodeHelper = (
   nodeId: string,
   nodes: ConversationNode[]
@@ -85,13 +94,84 @@ const getPathToNodeHelper = (
     const node = nodes.find((n) => n.id === currentId);
     if (node) {
       path.unshift(node);
-      currentId = node.parentId;
+      // Use first parent (regular nodes have one, merge nodes have multiple)
+      currentId = node.parentIds.length > 0 ? node.parentIds[0] : null;
     } else {
       break;
     }
   }
 
   return path;
+};
+
+// Helper to get ALL ancestor nodes for a node (handles DAG/merge nodes)
+// Collects from all parent paths, deduplicates, sorts chronologically
+const getAllAncestorNodes = (
+  nodeId: string,
+  nodes: ConversationNode[]
+): ConversationNode[] => {
+  const collected = new Map<string, ConversationNode>();
+  const toVisit: string[] = [nodeId];
+
+  while (toVisit.length > 0) {
+    const currentId = toVisit.pop()!;
+    if (collected.has(currentId)) continue;
+
+    const node = nodes.find((n) => n.id === currentId);
+    if (node) {
+      collected.set(currentId, node);
+      // Add all parents to visit (handles merge nodes with multiple parents)
+      toVisit.push(...node.parentIds);
+    }
+  }
+
+  // Sort by createdAt for chronological order
+  return Array.from(collected.values()).sort((a, b) => a.createdAt - b.createdAt);
+};
+
+// Build messages for LLM context (uses full DAG traversal for merge nodes)
+const buildMessagesForLLM = (
+  nodeId: string,
+  nodes: ConversationNode[]
+): Message[] => {
+  const ancestorNodes = getAllAncestorNodes(nodeId, nodes);
+  // Filter out empty content nodes (like merge point placeholders)
+  return ancestorNodes
+    .filter((node) => node.content.trim() !== '')
+    .map((node) => ({
+      id: node.id,
+      role: node.role,
+      content: node.content,
+      createdAt: node.createdAt,
+    }));
+};
+
+// Helper to check if nodeA is an ancestor of nodeB
+const isAncestor = (
+  ancestorId: string,
+  descendantId: string,
+  nodes: ConversationNode[]
+): boolean => {
+  const ancestors = getAllAncestorNodes(descendantId, nodes);
+  return ancestors.some((n) => n.id === ancestorId);
+};
+
+// Validate merge: no node should be an ancestor of another
+const validateMergeNodes = (
+  nodeIds: string[],
+  nodes: ConversationNode[]
+): { valid: boolean; error?: string } => {
+  for (let i = 0; i < nodeIds.length; i++) {
+    for (let j = 0; j < nodeIds.length; j++) {
+      if (i !== j && isAncestor(nodeIds[i], nodeIds[j], nodes)) {
+        return {
+          valid: false,
+          error: 'Cannot merge a node with its own ancestor (would duplicate context)',
+        };
+      }
+    }
+  }
+  return { valid: true };
 };
 
 // Helper to create a new chat
@@ -129,6 +209,7 @@ export const useConversationStore = create<ConversationState>()(
       nodes: [],
       activeNodeId: null,
       selectedNodeId: null,
+      selectedNodeIds: [],
       messages: [],
       chatName: 'Untitled',
       isStreaming: false,
@@ -152,6 +233,7 @@ export const useConversationStore = create<ConversationState>()(
           nodes: [],
           activeNodeId: null,
           selectedNodeId: null,
+          selectedNodeIds: [],
           messages: [],
           chatName: name,
           error: null,
@@ -179,6 +261,7 @@ export const useConversationStore = create<ConversationState>()(
           nodes: targetChat.nodes,
           activeNodeId: targetChat.activeNodeId,
           selectedNodeId: targetChat.activeNodeId,
+          selectedNodeIds: [],
           messages: buildMessagesFromPath(path),
           chatName: targetChat.name,
           error: null,
@@ -205,6 +288,7 @@ export const useConversationStore = create<ConversationState>()(
               nodes: newActive.nodes,
               activeNodeId: newActive.activeNodeId,
               selectedNodeId: newActive.activeNodeId,
+              selectedNodeIds: [],
               messages: buildMessagesFromPath(path),
               chatName: newActive.name,
             });
@@ -217,6 +301,7 @@ export const useConversationStore = create<ConversationState>()(
               nodes: [],
               activeNodeId: null,
               selectedNodeId: null,
+              selectedNodeIds: [],
               messages: [],
               chatName: 'Untitled',
             });
@@ -242,7 +327,7 @@ export const useConversationStore = create<ConversationState>()(
         const id = generateId();
         const node: ConversationNode = {
           id,
-          parentId,
+          parentIds: parentId ? [parentId] : [],
           role,
           content,
           createdAt: Date.now(),
@@ -265,6 +350,7 @@ export const useConversationStore = create<ConversationState>()(
             nodes: [node],
             activeNodeId: id,
             selectedNodeId: id,
+            selectedNodeIds: [],
             messages: buildMessagesFromPath(path),
             chatName: newChat.name,
             error: null,
@@ -288,6 +374,7 @@ export const useConversationStore = create<ConversationState>()(
           nodes: newNodes,
           activeNodeId: id,
           selectedNodeId: id,
+          selectedNodeIds: [],
           messages: buildMessagesFromPath(path),
           error: null,
         });
@@ -295,9 +382,70 @@ export const useConversationStore = create<ConversationState>()(
         return id;
       },
 
-      // Select a node (for canvas highlighting)
+      // Create a merge node with multiple parents
+      createMergeNode: (parentIds, branchSummaries) => {
+        if (parentIds.length < 2) return null;
+
+        const { nodes, chats, activeChatId, chatName } = get();
+
+        // Validate all parent nodes exist
+        const validParents = parentIds.filter((pid) => nodes.some((n) => n.id === pid));
+        if (validParents.length < 2) return null;
+
+        const id = generateId();
+        const mergeNode: ConversationNode = {
+          id,
+          parentIds: validParents,
+          role: 'user',  // Merge point is a user action
+          content: '',   // Empty - user will type synthesis prompt as next message
+          createdAt: Date.now(),
+          treeId: 'main',
+          branchSummaries,  // Store summaries for each parent branch
+        };
+
+        const newNodes = [...nodes, mergeNode];
+        const path = getPathToNodeHelper(id, newNodes);
+
+        // Update chats array
+        const updatedChats = chats.map((chat) =>
+          chat.id === activeChatId
+            ? { ...chat, nodes: newNodes, activeNodeId: id, name: chatName }
+            : chat
+        );
+
+        set({
+          chats: updatedChats,
+          nodes: newNodes,
+          activeNodeId: id,
+          selectedNodeId: id,
+          selectedNodeIds: [],  // Clear multi-select after merge
+          messages: buildMessagesFromPath(path),
+          error: null,
+        });
+
+        return id;
+      },
+
+      // Select a node (for canvas highlighting) - clears multi-select
       selectNode: (nodeId) => {
-        set({ selectedNodeId: nodeId });
+        set({ selectedNodeId: nodeId, selectedNodeIds: [] });
+      },
+
+      // Toggle node in multi-selection (for shift-click)
+      toggleNodeSelection: (nodeId) => {
+        const { selectedNodeIds } = get();
+        if (selectedNodeIds.includes(nodeId)) {
+          // Remove from selection
+          set({ selectedNodeIds: selectedNodeIds.filter((id) => id !== nodeId) });
+        } else {
+          // Add to selection
+          set({ selectedNodeIds: [...selectedNodeIds, nodeId] });
+        }
+      },
+
+      // Clear all multi-selection
+      clearNodeSelection: () => {
+        set({ selectedNodeIds: [] });
       },
 
       // Navigate to a node (change active conversation path)
@@ -338,6 +486,7 @@ export const useConversationStore = create<ConversationState>()(
           nodes: [],
           activeNodeId: null,
           selectedNodeId: null,
+          selectedNodeIds: [],
           messages: [],
           error: null,
         });
@@ -426,6 +575,26 @@ export const useConversationStore = create<ConversationState>()(
         if (!activeNodeId) return [];
         return getPathToNodeHelper(activeNodeId, nodes);
       },
+
+      // Get messages for LLM (full context from all branches for merge nodes)
+      getMessagesForLLM: () => {
+        const { activeNodeId, nodes } = get();
+        if (!activeNodeId) return [];
+        return buildMessagesForLLM(activeNodeId, nodes);
+      },
+
+      // Get messages for a specific node path (single parent path)
+      getMessagesForNode: (nodeId) => {
+        const { nodes } = get();
+        const path = getPathToNodeHelper(nodeId, nodes);
+        return buildMessagesFromPath(path);
+      },
+
+      // Validate merge before attempting
+      validateMerge: (nodeIds) => {
+        const { nodes } = get();
+        return validateMergeNodes(nodeIds, nodes);
+      },
     }),
     {
       name: 'node-map-conversation',
@@ -435,6 +604,26 @@ export const useConversationStore = create<ConversationState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
+
+        // Migrate nodes from old parentId to new parentIds format
+        const migrateNode = (node: ConversationNode & { parentId?: string | null }): ConversationNode => {
+          // If node already has parentIds, it's already migrated
+          if (Array.isArray(node.parentIds)) {
+            return node;
+          }
+          // Migrate from old parentId format
+          const { parentId, ...rest } = node;
+          return {
+            ...rest,
+            parentIds: parentId ? [parentId] : [],
+          } as ConversationNode;
+        };
+
+        // Migrate all nodes in all chats
+        state.chats = state.chats.map((chat) => ({
+          ...chat,
+          nodes: chat.nodes.map(migrateNode),
+        }));
 
         // If no chats, create default one
         if (state.chats.length === 0) {
