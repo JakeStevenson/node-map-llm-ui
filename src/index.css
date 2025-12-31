@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+/* System theme support using CSS custom properties */
+@theme {
+  /* Base colors */
+  --color-background: #ffffff;
+  --color-surface: #f3f4f6;
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-border: #e5e7eb;
+
+  /* Accent - Blue */
+  --color-accent: #2563eb;
+  --color-accent-light: #dbeafe;
+
+  /* Semantic */
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+}
+
+/* Dark mode via system preference */
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: #030712;
+    --color-surface: #1f2937;
+    --color-text-primary: #f3f4f6;
+    --color-text-secondary: #9ca3af;
+    --color-border: #374151;
+
+    --color-accent: #3b82f6;
+    --color-accent-light: #1e3a5f;
+  }
+}
+
+/* Base styles */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.625;
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
