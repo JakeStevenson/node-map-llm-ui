@@ -1,7 +1,9 @@
 import type { NodeTypes } from '@xyflow/react';
+import { ConversationNode } from './ConversationNode';
 
-// Custom node types will be registered here
-// ConversationNode will be added in Epic 3
 export const nodeTypes = {
-  // 'conversation': ConversationNode,
+  conversation: ConversationNode,
 } satisfies NodeTypes;
+
+export { ConversationNode } from './ConversationNode';
+export type { ConversationNodeData, ConversationNodeType } from './ConversationNode';

@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useConversationStore, createUserMessage } from '../../store/conversationStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { sendMessage } from '../../services/llmService';
@@ -35,10 +37,17 @@ export function ChatSidebar({ className = '', onOpenSettings }: ChatSidebarProps
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Focus textarea on mount
+  // Focus textarea on mount and after streaming completes
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // Refocus after streaming ends
+  useEffect(() => {
+    if (!isStreaming && isConfigured) {
+      textareaRef.current?.focus();
+    }
+  }, [isStreaming, isConfigured]);
 
   // Handle send message
   const handleSend = useCallback(async () => {
@@ -233,13 +242,19 @@ function MessageBubble({
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap ${
+        className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
           isUser
-            ? 'bg-[var(--color-accent)] text-white'
+            ? 'bg-[var(--color-accent)] text-white whitespace-pre-wrap'
             : 'bg-[var(--color-background)] text-[var(--color-text-primary)] border border-[var(--color-border)]'
         }`}
       >
-        {content}
+        {isUser ? (
+          content
+        ) : (
+          <div className="prose prose-sm prose-invert max-w-none prose-pre:bg-[var(--color-surface)] prose-pre:border prose-pre:border-[var(--color-border)] prose-code:text-[var(--color-accent)] prose-code:before:content-none prose-code:after:content-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          </div>
+        )}
         {isStreaming && (
           <span className="inline-block w-1.5 h-4 ml-1 bg-current animate-pulse" />
         )}
