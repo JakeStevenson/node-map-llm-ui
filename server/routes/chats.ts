@@ -4,6 +4,13 @@ import db from '../db/index.js';
 const router = Router();
 
 // Types matching frontend
+interface SearchMetadata {
+  query: string;
+  results: Array<{ title: string; url: string; snippet: string; source?: string }>;
+  timestamp: number;
+  provider: 'searxng';
+}
+
 interface ConversationNode {
   id: string;
   parentIds: string[];
@@ -12,6 +19,7 @@ interface ConversationNode {
   createdAt: number;
   treeId: string;
   branchSummaries?: Array<{ nodeId: string; summary: string }>;
+  searchMetadata?: SearchMetadata;
 }
 
 interface DbChatRow {
@@ -28,6 +36,7 @@ interface DbNodeRow {
   content: string;
   treeId: string;
   createdAt: number;
+  searchMetadata: string | null;
 }
 
 // Helper to generate IDs
@@ -69,7 +78,8 @@ router.get('/:id', (req: Request, res: Response) => {
 
     // Get nodes
     const nodes = db.prepare(`
-      SELECT id, role, content, tree_id as treeId, created_at as createdAt
+      SELECT id, role, content, tree_id as treeId, created_at as createdAt,
+             search_metadata as searchMetadata
       FROM conversation_nodes WHERE chat_id = ?
       ORDER BY created_at
     `).all(req.params.id) as DbNodeRow[];
@@ -105,7 +115,7 @@ router.get('/:id', (req: Request, res: Response) => {
       summaryMap.get(s.node_id)!.push({ nodeId: s.nodeId, summary: s.summary });
     }
 
-    // Assemble nodes with parentIds and branchSummaries
+    // Assemble nodes with parentIds, branchSummaries, and searchMetadata
     const assembledNodes: ConversationNode[] = nodes.map((n) => ({
       id: n.id,
       role: n.role as 'user' | 'assistant',
@@ -114,6 +124,7 @@ router.get('/:id', (req: Request, res: Response) => {
       createdAt: n.createdAt,
       parentIds: parentMap.get(n.id) || [],
       branchSummaries: summaryMap.get(n.id),
+      searchMetadata: n.searchMetadata ? JSON.parse(n.searchMetadata) : undefined,
     }));
 
     res.json({
@@ -210,7 +221,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 // POST /api/chats/:chatId/nodes - Add node to chat
 router.post('/:chatId/nodes', (req: Request, res: Response) => {
   try {
-    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main' } = req.body;
+    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main', searchMetadata } = req.body;
     const chatId = req.params.chatId;
     // Use provided ID if given (allows frontend to maintain ID consistency)
     const id = providedId || generateId();
@@ -225,9 +236,9 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
     const insertNode = db.transaction(() => {
       // Insert node
       db.prepare(`
-        INSERT INTO conversation_nodes (id, chat_id, role, content, tree_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, chatId, role, content, treeId, now);
+        INSERT INTO conversation_nodes (id, chat_id, role, content, tree_id, created_at, search_metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(id, chatId, role, content, treeId, now, searchMetadata ? JSON.stringify(searchMetadata) : null);
 
       // Insert parent relationships
       for (let i = 0; i < parentIds.length; i++) {
@@ -261,6 +272,7 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
       createdAt: now,
       treeId,
       branchSummaries,
+      searchMetadata,
     };
 
     res.status(201).json(node);

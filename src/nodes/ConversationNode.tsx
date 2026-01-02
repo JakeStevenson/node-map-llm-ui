@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
+import { SearchIcon } from '../components/icons';
 
 export interface ConversationNodeData extends Record<string, unknown> {
   role: 'user' | 'assistant';
@@ -8,12 +9,13 @@ export interface ConversationNodeData extends Record<string, unknown> {
   isOnActivePath: boolean;
   isSelected: boolean;  // Multi-select for merge feature
   childCount: number;
+  hasSearchMetadata: boolean;  // Whether web search was used for this response
 }
 
 export type ConversationNodeType = Node<ConversationNodeData, 'conversation'>;
 
 function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNodeType>): JSX.Element {
-  const { role, content, isActive, isOnActivePath, isSelected, childCount } = data;
+  const { role, content, isActive, isOnActivePath, isSelected, childCount, hasSearchMetadata } = data;
   const isUser = role === 'user';
   const hasChildren = childCount > 0;
 
@@ -33,7 +35,7 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
 
       <div
         className={`
-          px-3 py-2 rounded-lg w-[180px] text-sm
+          relative px-3 py-2 rounded-lg w-[180px] text-sm
           transition-all duration-150 cursor-pointer
           ${isUser
             ? 'bg-[var(--color-accent)] text-white'
@@ -64,6 +66,16 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
         <div className="break-words leading-snug line-clamp-3">
           {displayContent}
         </div>
+
+        {/* Search indicator badge */}
+        {hasSearchMetadata && (
+          <div
+            className="absolute -top-1.5 -right-1.5 p-1 bg-blue-500 rounded-full shadow-sm"
+            title="Web search was used"
+          >
+            <SearchIcon size={10} strokeWidth={2.5} className="text-white" />
+          </div>
+        )}
       </div>
 
 

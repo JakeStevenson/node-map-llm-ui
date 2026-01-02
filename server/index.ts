@@ -3,6 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import chatsRouter from './routes/chats.js';
+import searchRouter from './routes/search.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +17,7 @@ app.use(express.json());
 
 // API routes
 app.use('/api/chats', chatsRouter);
+app.use('/api/search', searchRouter);
 
 // Health check endpoint
 app.get('/api/health', (_req, res) => {

@@ -117,6 +117,7 @@ function CanvasViewInner(): JSX.Element {
           isOnActivePath: activePathIds.has(node.id),
           isSelected: selectedNodeIds.includes(node.id),
           childCount: childCounts.get(node.id) || 0,
+          hasSearchMetadata: !!node.searchMetadata,
         } as ConversationNodeData,
       };
     });

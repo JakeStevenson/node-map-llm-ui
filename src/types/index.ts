@@ -25,6 +25,34 @@ export interface BranchSummary {
   summary: string;
 }
 
+// Web Search Types
+export interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+  source?: string;  // e.g., "wikipedia", "stackoverflow"
+}
+
+export interface SearchMetadata {
+  query: string;
+  results: SearchResult[];
+  timestamp: number;
+  provider: 'searxng';
+}
+
+// Client-side web search preferences (endpoint is server-side for security)
+export interface WebSearchConfig {
+  enabled: boolean;
+  provider: 'searxng';
+  maxResults: number;
+}
+
+// Server-side search config response
+export interface ServerSearchConfig {
+  enabled: boolean;
+  provider: 'searxng';
+}
+
 // Conversation Node for DAG structure (supports merge)
 export interface ConversationNode {
   id: string;
@@ -34,6 +62,7 @@ export interface ConversationNode {
   createdAt: number;
   treeId: string;
   branchSummaries?: BranchSummary[];  // Only present on merge nodes
+  searchMetadata?: SearchMetadata;     // Present when web search was used
 }
 
 // Streaming Types

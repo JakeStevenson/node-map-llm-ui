@@ -1,4 +1,4 @@
-import { ConversationNode, BranchSummary } from '../types';
+import { ConversationNode, BranchSummary, SearchMetadata } from '../types';
 
 const API_BASE = '/api';
 
@@ -27,6 +27,7 @@ export interface CreateNodeRequest {
   parentIds: string[];
   treeId?: string;
   branchSummaries?: BranchSummary[];
+  searchMetadata?: SearchMetadata;
 }
 
 // Fetch all chats (lightweight list without nodes)

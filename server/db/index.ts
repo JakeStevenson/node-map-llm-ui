@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS conversation_nodes (
   content TEXT NOT NULL,
   tree_id TEXT NOT NULL DEFAULT 'main',
   created_at INTEGER NOT NULL,
+  search_metadata TEXT,
   FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 );
 
@@ -66,6 +67,13 @@ CREATE INDEX IF NOT EXISTS idx_branch_summaries_node ON branch_summaries(node_id
 `;
 
 db.exec(schema);
+
+// Migration: Add search_metadata column if it doesn't exist (for existing databases)
+try {
+  db.exec('ALTER TABLE conversation_nodes ADD COLUMN search_metadata TEXT');
+} catch {
+  // Column already exists, ignore error
+}
 
 console.log(`Database initialized at ${DB_PATH}`);
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Message, ConversationNode, BranchSummary } from '../types';
+import type { Message, ConversationNode, BranchSummary, SearchMetadata } from '../types';
 import * as api from '../services/apiService';
 
 // Chat type for managing multiple conversations
@@ -33,6 +33,10 @@ interface ConversationState {
   streamingContent: string;
   streamingParentId: string | null;
 
+  // Search state
+  isSearching: boolean;
+  searchQuery: string | null;
+
   // Error state
   error: string | null;
 
@@ -46,7 +50,7 @@ interface ConversationState {
   renameChat: (name: string) => void;
 
   // Tree Actions
-  addNode: (role: 'user' | 'assistant', content: string, parentId: string | null) => string;
+  addNode: (role: 'user' | 'assistant', content: string, parentId: string | null, searchMetadata?: SearchMetadata) => string;
   createMergeNode: (parentIds: string[], branchSummaries?: BranchSummary[]) => string | null;
   selectNode: (nodeId: string | null) => void;
   toggleNodeSelection: (nodeId: string) => void;
@@ -63,6 +67,8 @@ interface ConversationState {
   setStreamingContent: (content: string) => void;
   appendStreamingContent: (chunk: string) => void;
   finalizeStreaming: () => void;
+  finalizeStreamingWithSearch: (searchMetadata?: SearchMetadata) => void;
+  setIsSearching: (searching: boolean, query?: string) => void;
   setError: (error: string | null) => void;
 
   // Computed helpers
@@ -281,6 +287,8 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   isStreaming: false,
   streamingContent: '',
   streamingParentId: null,
+  isSearching: false,
+  searchQuery: null,
   error: null,
 
   // Initialize from API
@@ -527,7 +535,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   },
 
   // Add a node to the tree
-  addNode: (role, content, parentId) => {
+  addNode: (role, content, parentId, searchMetadata) => {
     const id = generateId();
     const node: ConversationNode = {
       id,
@@ -536,6 +544,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       content,
       createdAt: Date.now(),
       treeId: 'main',
+      searchMetadata,
     };
 
     const { nodes, chats, activeChatId, chatName } = get();
@@ -577,6 +586,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           role,
           content,
           parentIds: parentId ? [parentId] : [],
+          searchMetadata,
         });
         await api.updateChat(created.id, { activeNodeId: id });
       });
@@ -625,6 +635,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         role,
         content,
         parentIds: parentId ? [parentId] : [],
+        searchMetadata,
       });
       await api.updateChat(serverChatId, { activeNodeId: id });
 
@@ -842,13 +853,33 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         streamingContent: '',
         isStreaming: false,
         streamingParentId: null,
+        isSearching: false,
+        searchQuery: null,
       });
     } else {
-      set({ isStreaming: false, streamingContent: '', streamingParentId: null });
+      set({ isStreaming: false, streamingContent: '', streamingParentId: null, isSearching: false, searchQuery: null });
     }
   },
 
-  setError: (error) => set({ error, isStreaming: false }),
+  finalizeStreamingWithSearch: (searchMetadata) => {
+    const { streamingContent, streamingParentId } = get();
+    if (streamingContent) {
+      get().addNode('assistant', streamingContent, streamingParentId, searchMetadata);
+      set({
+        streamingContent: '',
+        isStreaming: false,
+        streamingParentId: null,
+        isSearching: false,
+        searchQuery: null,
+      });
+    } else {
+      set({ isStreaming: false, streamingContent: '', streamingParentId: null, isSearching: false, searchQuery: null });
+    }
+  },
+
+  setIsSearching: (searching, query) => set({ isSearching: searching, searchQuery: query || null }),
+
+  setError: (error) => set({ error, isStreaming: false, isSearching: false, searchQuery: null }),
 
   getPathToNode: (nodeId) => {
     const { nodes } = get();

@@ -3,9 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConversationStore, createUserMessage } from '../../store/conversationStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { sendMessage, generateBranchSummary } from '../../services/llmService';
-import { BranchIcon } from '../icons';
-import type { BranchSummary } from '../../types';
+import { sendMessageWithSearch, generateBranchSummary } from '../../services/llmService';
+import { BranchIcon, SearchIcon } from '../icons';
+import type { BranchSummary, SearchMetadata } from '../../types';
 
 interface ChatSidebarProps {
   className?: string;
@@ -19,6 +19,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [isMerging, setIsMerging] = useState(false);
+  const [searchEnabled, setSearchEnabled] = useState(false);  // Manual search toggle
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -28,6 +29,8 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     messages,
     isStreaming,
     streamingContent,
+    isSearching,
+    searchQuery,
     error,
     chatName,
     selectedNodeIds,
@@ -37,7 +40,8 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     createMergeNode,
     setIsStreaming,
     appendStreamingContent,
-    finalizeStreaming,
+    finalizeStreamingWithSearch,
+    setIsSearching,
     setError,
     clearTree,
     renameChat,
@@ -54,7 +58,12 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
 
   const showMergeBar = selectedNodeIds.length >= 2;
 
-  const { endpoint, apiKey, model } = useSettingsStore();
+  const { endpoint, apiKey, model, webSearch, serverSearchConfig, fetchServerSearchConfig } = useSettingsStore();
+
+  // Fetch server search config on mount
+  useEffect(() => {
+    fetchServerSearchConfig();
+  }, [fetchServerSearchConfig]);
 
   const isConfigured = endpoint && model;
 
@@ -127,14 +136,26 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     // Get full context for LLM (handles merge nodes with multiple parents)
     const allMessages = getMessagesForLLM();
 
-    await sendMessage(
-      { endpoint, apiKey, model },
-      allMessages,
-      (chunk) => appendStreamingContent(chunk),
-      () => finalizeStreaming(),
-      (err) => setError(err.message),
-      abortControllerRef.current.signal
-    );
+    // Build search config if user toggled search for this message AND server has search
+    const effectiveSearchConfig = (searchEnabled && serverSearchConfig?.enabled)
+      ? { enabled: true, provider: 'searxng' as const, maxResults: webSearch.maxResults }
+      : null;
+
+    await sendMessageWithSearch({
+      config: { endpoint, apiKey, model },
+      messages: allMessages,
+      webSearchConfig: effectiveSearchConfig,
+      searchQuery: searchEnabled ? trimmedInput : undefined,  // Use user's message as query
+      onChunk: (chunk) => appendStreamingContent(chunk),
+      onSearchStart: (query) => setIsSearching(true, query),
+      onSearchComplete: () => setIsSearching(false),
+      onDone: (searchMetadata) => {
+        finalizeStreamingWithSearch(searchMetadata);
+        setSearchEnabled(false);  // Reset toggle after send
+      },
+      onError: (err) => setError(err.message),
+      abortSignal: abortControllerRef.current.signal,
+    });
   }, [
     input,
     isStreaming,
@@ -142,11 +163,15 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     endpoint,
     apiKey,
     model,
+    webSearch.maxResults,
+    serverSearchConfig?.enabled,
+    searchEnabled,
     getMessagesForLLM,
     addMessage,
     setIsStreaming,
     appendStreamingContent,
-    finalizeStreaming,
+    finalizeStreamingWithSearch,
+    setIsSearching,
     setError,
   ]);
 
@@ -156,8 +181,8 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    finalizeStreaming();
-  }, [finalizeStreaming]);
+    finalizeStreamingWithSearch();
+  }, [finalizeStreamingWithSearch]);
 
   // Handle key press
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -318,18 +343,41 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
           </div>
         )}
 
-        {messages.map((message) => (
-          <MessageBubble key={message.id} role={message.role} content={message.content} />
-        ))}
+        {messages.map((message) => {
+          // Find the corresponding node to get searchMetadata
+          const node = nodes.find((n) => n.id === message.id);
+          return (
+            <MessageBubble
+              key={message.id}
+              role={message.role}
+              content={message.content}
+              searchMetadata={node?.searchMetadata}
+            />
+          );
+        })}
 
         {/* Loading indicator - waiting for first chunk */}
-        {isStreaming && !streamingContent && (
+        {isStreaming && !streamingContent && !isSearching && (
           <div className="flex justify-start">
             <div className="px-3 py-2 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]">
               <div className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-[var(--color-text-secondary)] rounded-full animate-bounce [animation-delay:-0.3s]" />
                 <span className="w-2 h-2 bg-[var(--color-text-secondary)] rounded-full animate-bounce [animation-delay:-0.15s]" />
                 <span className="w-2 h-2 bg-[var(--color-text-secondary)] rounded-full animate-bounce" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Search in progress indicator */}
+        {isSearching && searchQuery && (
+          <div className="flex justify-start">
+            <div className="px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
+              <div className="flex items-center gap-2">
+                <SearchIcon size={14} className="text-blue-500 animate-pulse" />
+                <span className="text-sm text-blue-500">
+                  Searching: "{searchQuery}"
+                </span>
               </div>
             </div>
           </div>
@@ -431,9 +479,28 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
             </button>
           )}
         </div>
-        <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
-          Enter to send • Shift+Enter for newline
-        </p>
+        <div className="mt-2 flex items-center justify-between">
+          <p className="text-xs text-[var(--color-text-secondary)]">
+            Enter to send • Shift+Enter for newline
+          </p>
+          {/* Search toggle - only show if server has search configured */}
+          {serverSearchConfig?.enabled && (
+            <button
+              type="button"
+              onClick={() => setSearchEnabled(!searchEnabled)}
+              disabled={isStreaming}
+              className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors ${
+                searchEnabled
+                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  : 'bg-[var(--color-background)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:border-blue-500/30 hover:text-blue-400'
+              } disabled:opacity-50`}
+              title={searchEnabled ? 'Web search enabled for next message' : 'Click to enable web search'}
+            >
+              <SearchIcon size={12} />
+              <span>{searchEnabled ? 'Search ON' : 'Search'}</span>
+            </button>
+          )}
+        </div>
       </div>
     </aside>
   );
@@ -444,15 +511,19 @@ function MessageBubble({
   role,
   content,
   isStreaming = false,
+  searchMetadata,
 }: {
   role: 'user' | 'assistant' | 'system';
   content: string;
   isStreaming?: boolean;
+  searchMetadata?: SearchMetadata;
 }): JSX.Element {
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const isUser = role === 'user';
+  const hasSearch = searchMetadata && searchMetadata.results.length > 0;
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
       <div
         className={`max-w-[85%] px-3 py-2 rounded-lg text-sm overflow-hidden ${
           isUser
@@ -471,6 +542,67 @@ function MessageBubble({
           <span className="inline-block w-1.5 h-4 ml-1 bg-current animate-pulse" />
         )}
       </div>
+
+      {/* Sources panel - only for assistant messages with search */}
+      {!isUser && hasSearch && (
+        <div className="mt-2 max-w-[85%] rounded-lg bg-blue-500/10 border border-blue-500/20 overflow-hidden">
+          {/* Clickable header */}
+          <button
+            onClick={() => setSourcesExpanded(!sourcesExpanded)}
+            className="w-full px-3 py-2 flex items-center justify-between hover:bg-blue-500/5 transition-colors"
+          >
+            <div className="flex items-center gap-1.5">
+              <SearchIcon size={12} className="text-blue-500" />
+              <span className="text-xs font-medium text-blue-500">
+                Sources ({searchMetadata.results.length})
+              </span>
+            </div>
+            <svg
+              className={`w-4 h-4 text-blue-500 transition-transform ${sourcesExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {/* Expandable content */}
+          {sourcesExpanded && (
+            <div className="px-3 pb-3 space-y-2 border-t border-blue-500/20">
+              {searchMetadata.results.map((result, i) => (
+                <div key={i} className="pt-2">
+                  <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-medium text-blue-400 hover:text-blue-300 hover:underline block"
+                  >
+                    {result.title}
+                  </a>
+                  {result.snippet && (
+                    <p className="text-xs text-[var(--color-text-secondary)] mt-1 line-clamp-2">
+                      {result.snippet}
+                    </p>
+                  )}
+                  <span className="text-[10px] text-[var(--color-text-secondary)] opacity-60 block mt-0.5 truncate">
+                    {result.url}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Collapsed preview */}
+          {!sourcesExpanded && (
+            <div className="px-3 pb-2">
+              <p className="text-xs text-[var(--color-text-secondary)] truncate">
+                {searchMetadata.results.slice(0, 3).map(r => r.title).join(' • ')}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

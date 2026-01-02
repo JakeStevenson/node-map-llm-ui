@@ -1,4 +1,5 @@
-import type { LLMConfig, LLMModel, LLMError, Message } from '../types';
+import type { LLMConfig, LLMModel, LLMError, Message, SearchMetadata, WebSearchConfig } from '../types';
+import { executeSearch, formatSearchResultsForLLM } from './searchService';
 
 // Fetch available models from the endpoint
 export async function fetchModels(config: LLMConfig): Promise<LLMModel[]> {
@@ -126,7 +127,8 @@ export async function sendMessage(
         break;
       }
 
-      buffer += decoder.decode(value, { stream: true });
+      const rawChunk = decoder.decode(value, { stream: true });
+      buffer += rawChunk;
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
@@ -144,7 +146,7 @@ export async function sendMessage(
               onChunk(content);
             }
           } catch {
-            // Skip malformed JSON
+            // Ignore malformed JSON chunks
           }
         }
       }
@@ -160,6 +162,201 @@ export async function sendMessage(
       onError(createError('network', 'Connection failed'));
     }
   }
+}
+
+// Regex to detect search tags
+const SEARCH_TAG_REGEX = /<search>([\s\S]*?)<\/search>/;
+
+// Options for search-aware streaming
+export interface StreamWithSearchOptions {
+  config: LLMConfig;
+  messages: Message[];
+  webSearchConfig: WebSearchConfig | null;
+  searchQuery?: string;  // Explicit search query (user-provided)
+  onChunk: (content: string) => void;
+  onSearchStart: (query: string) => void;
+  onSearchComplete: (metadata: SearchMetadata) => void;
+  onDone: (searchMetadata?: SearchMetadata) => void;
+  onError: (error: LLMError) => void;
+  abortSignal?: AbortSignal;
+}
+
+// Send a message with search capability
+export async function sendMessageWithSearch(options: StreamWithSearchOptions): Promise<void> {
+  const {
+    config,
+    messages,
+    webSearchConfig,
+    searchQuery: explicitSearchQuery,
+    onChunk,
+    onSearchStart,
+    onSearchComplete,
+    onDone,
+    onError,
+    abortSignal,
+  } = options;
+
+  let accumulatedContent = '';
+  let searchMetadata: SearchMetadata | undefined;
+  let searchExecuted = false;
+
+  let effectiveMessages = [...messages];
+
+  // If user explicitly requested search, do it
+  if (explicitSearchQuery && webSearchConfig?.enabled) {
+    onSearchStart(explicitSearchQuery);
+
+    try {
+      searchMetadata = await executeSearch({
+        query: explicitSearchQuery,
+        maxResults: webSearchConfig.maxResults,
+      });
+      onSearchComplete(searchMetadata);
+
+      // Append search results to user's message (avoid system role which breaks some models)
+      const searchContext = formatSearchResultsForLLM(searchMetadata);
+      const lastIdx = messages.length - 1;
+      effectiveMessages = messages.map((m, i) =>
+        i === lastIdx
+          ? { ...m, content: `${m.content}\n\n---\nWeb search results for "${explicitSearchQuery}":\n${searchContext}\n---\n\nPlease use the search results above to answer my question.` }
+          : m
+      );
+    } catch {
+      // Search failed, continue without results
+    }
+  }
+
+  // Track what content we've already emitted
+  let emittedLength = 0;
+
+  // First streaming pass
+  try {
+    await new Promise<void>((resolve, reject) => {
+      sendMessage(
+        config,
+        effectiveMessages,
+        (chunk) => {
+          accumulatedContent += chunk;
+
+          // Check for search tag
+          if (webSearchConfig?.enabled && !searchExecuted) {
+            const match = accumulatedContent.match(SEARCH_TAG_REGEX);
+            if (match) {
+              // Found complete search tag - emit content before the tag
+              const tagStart = accumulatedContent.indexOf('<search>');
+              if (emittedLength < tagStart) {
+                onChunk(accumulatedContent.substring(emittedLength, tagStart));
+                emittedLength = tagStart;
+              }
+              return; // Don't emit the search tag or content after it yet
+            }
+
+            // If we see the start of a search tag, buffer it
+            if (accumulatedContent.includes('<search>') && !accumulatedContent.includes('</search>')) {
+              const tagStart = accumulatedContent.indexOf('<search>');
+              if (emittedLength < tagStart) {
+                onChunk(accumulatedContent.substring(emittedLength, tagStart));
+                emittedLength = tagStart;
+              }
+              return;
+            }
+          }
+
+          // Normal chunk - emit it
+          onChunk(chunk);
+          emittedLength = accumulatedContent.length;
+        },
+        () => resolve(),
+        (err) => reject(err),
+        abortSignal
+      );
+    });
+  } catch (err) {
+    if (!abortSignal?.aborted) {
+      onError(isLLMError(err) ? err : createError('unknown', 'Streaming failed'));
+    }
+    onDone(undefined);
+    return;
+  }
+
+  // Handle incomplete search tag (LLM started <search> but didn't close it)
+  if (accumulatedContent.includes('<search>') && !accumulatedContent.includes('</search>')) {
+    // Emit the buffered content as-is since search tag wasn't completed
+    const tagStart = accumulatedContent.indexOf('<search>');
+    if (emittedLength <= tagStart) {
+      onChunk(accumulatedContent.substring(emittedLength));
+    }
+    onDone(undefined);
+    return;
+  }
+
+  // Check if we found a search tag
+  const searchMatch = accumulatedContent.match(SEARCH_TAG_REGEX);
+
+  if (searchMatch && webSearchConfig?.enabled && !searchExecuted) {
+    const query = searchMatch[1].trim();
+    searchExecuted = true;
+
+    onSearchStart(query);
+
+    try {
+      // Execute the search
+      searchMetadata = await executeSearch({
+        query,
+        maxResults: webSearchConfig.maxResults,
+      });
+      onSearchComplete(searchMetadata);
+
+      // Get content before the search tag
+      const contentBeforeTag = accumulatedContent.substring(0, accumulatedContent.indexOf('<search>'));
+
+      // Build continuation messages with search results
+      const searchResultsText = formatSearchResultsForLLM(searchMetadata);
+      const continuationMessages: Message[] = [
+        ...effectiveMessages,
+        {
+          id: 'search-partial',
+          role: 'assistant',
+          content: contentBeforeTag + `\n\n[Searched for: "${query}"]`,
+          createdAt: Date.now(),
+        },
+        {
+          id: 'search-results',
+          role: 'system',
+          content: searchResultsText,
+          createdAt: Date.now(),
+        },
+      ];
+
+      // Reset and continue generation with search results
+      accumulatedContent = contentBeforeTag;
+
+      await new Promise<void>((resolve, reject) => {
+        sendMessage(
+          config,
+          continuationMessages,
+          (chunk) => {
+            accumulatedContent += chunk;
+            onChunk(chunk);
+          },
+          () => resolve(),
+          (err) => reject(err),
+          abortSignal
+        );
+      }).catch((err) => {
+        if (!abortSignal?.aborted) {
+          onError(isLLMError(err) ? err : createError('unknown', 'Continuation failed'));
+        }
+      });
+
+    } catch (searchError) {
+      // Search failed - let the model continue without results
+      console.error('Search failed:', searchError);
+      onChunk(`\n\n[Search failed: ${searchError instanceof Error ? searchError.message : 'Unknown error'}]\n\n`);
+    }
+  }
+
+  onDone(searchMetadata);
 }
 
 // Helper to create typed errors

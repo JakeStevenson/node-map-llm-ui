@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSettingsStore } from '../../store/settingsStore';
 import { fetchModels } from '../../services/llmService';
+import { testSearchEndpoint } from '../../services/searchService';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -15,23 +16,44 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     availableModels,
     isLoadingModels,
     modelsError,
+    webSearch,
+    serverSearchConfig,
+    isLoadingServerSearch,
     setModel,
     updateConfig,
     setAvailableModels,
     setIsLoadingModels,
     setModelsError,
+    updateWebSearchConfig,
+    fetchServerSearchConfig,
   } = useSettingsStore();
 
   const [localEndpoint, setLocalEndpoint] = useState(endpoint);
   const [localApiKey, setLocalApiKey] = useState(apiKey);
+
+  // Web search local state
+  const [localSearchEnabled, setLocalSearchEnabled] = useState(webSearch.enabled);
+  const [localSearchMaxResults, setLocalSearchMaxResults] = useState(webSearch.maxResults);
+  const [isTestingSearch, setIsTestingSearch] = useState(false);
+  const [searchTestResult, setSearchTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+
+  // Fetch server search config on mount
+  useEffect(() => {
+    if (isOpen) {
+      fetchServerSearchConfig();
+    }
+  }, [isOpen, fetchServerSearchConfig]);
 
   // Sync local state when modal opens
   useEffect(() => {
     if (isOpen) {
       setLocalEndpoint(endpoint);
       setLocalApiKey(apiKey);
+      setLocalSearchEnabled(webSearch.enabled);
+      setLocalSearchMaxResults(webSearch.maxResults);
+      setSearchTestResult(null);
     }
-  }, [isOpen, endpoint, apiKey]);
+  }, [isOpen, endpoint, apiKey, webSearch]);
 
   // Fetch models when endpoint/key changes
   const handleFetchModels = useCallback(async () => {
@@ -61,11 +83,25 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     }
   }, [localEndpoint, localApiKey, model, setAvailableModels, setIsLoadingModels, setModelsError, setModel]);
 
+  // Test search endpoint (server-side)
+  const handleTestSearch = async () => {
+    setIsTestingSearch(true);
+    setSearchTestResult(null);
+
+    const result = await testSearchEndpoint();
+    setSearchTestResult(result);
+    setIsTestingSearch(false);
+  };
+
   // Handle save
   const handleSave = () => {
     updateConfig({
       endpoint: localEndpoint,
       apiKey: localApiKey,
+    });
+    updateWebSearchConfig({
+      enabled: localSearchEnabled,
+      maxResults: localSearchMaxResults,
     });
     onClose();
   };
@@ -82,6 +118,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
+
+  const serverSearchAvailable = serverSearchConfig?.enabled ?? false;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -194,6 +232,101 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
               </select>
             </div>
           )}
+
+          {/* Web Search Section */}
+          <div className="pt-4 border-t border-[var(--color-border)]">
+            <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-3">
+              Web Search (Optional)
+            </h3>
+
+            {isLoadingServerSearch ? (
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                Checking server search config...
+              </p>
+            ) : serverSearchAvailable ? (
+              <>
+                {/* Server has search configured */}
+                <div className="mb-3 p-2 rounded bg-green-500/10 text-green-400 text-xs">
+                  Searxng configured on server (SEARXNG_ENDPOINT)
+                </div>
+
+                {/* Enable Toggle */}
+                <label className="flex items-center gap-2 mb-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localSearchEnabled}
+                    onChange={(e) => setLocalSearchEnabled(e.target.checked)}
+                    className="w-4 h-4 rounded border-[var(--color-border)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                  <span className="text-sm text-[var(--color-text-primary)]">
+                    Enable web search
+                  </span>
+                </label>
+
+                {localSearchEnabled && (
+                  <>
+                    {/* Max Results */}
+                    <div className="mb-3">
+                      <label
+                        htmlFor="maxResults"
+                        className="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+                      >
+                        Max Results
+                      </label>
+                      <select
+                        id="maxResults"
+                        value={localSearchMaxResults}
+                        onChange={(e) => setLocalSearchMaxResults(Number(e.target.value))}
+                        className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent"
+                      >
+                        {[3, 5, 8, 10].map((n) => (
+                          <option key={n} value={n}>
+                            {n} results
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Test Button */}
+                    <button
+                      type="button"
+                      onClick={handleTestSearch}
+                      disabled={isTestingSearch}
+                      className="px-4 py-2 text-sm font-medium text-white bg-[var(--color-accent)] rounded-lg hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isTestingSearch ? 'Testing...' : 'Test Connection'}
+                    </button>
+
+                    {/* Test Result */}
+                    {searchTestResult && (
+                      <p
+                        className={`mt-2 text-sm ${
+                          searchTestResult.success
+                            ? 'text-green-500'
+                            : 'text-[var(--color-error)]'
+                        }`}
+                      >
+                        {searchTestResult.success
+                          ? 'Connection successful!'
+                          : searchTestResult.error || 'Connection failed'}
+                      </p>
+                    )}
+                  </>
+                )}
+              </>
+            ) : (
+              /* Server does NOT have search configured */
+              <div className="text-sm text-[var(--color-text-secondary)]">
+                <p className="mb-2">
+                  Web search is not configured on the server.
+                </p>
+                <p className="text-xs">
+                  Set <code className="px-1 py-0.5 bg-[var(--color-background)] rounded">SEARXNG_ENDPOINT</code> environment
+                  variable on the server to enable.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
