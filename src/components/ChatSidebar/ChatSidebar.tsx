@@ -446,7 +446,24 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
 
       {/* Input Area */}
       <div className="p-4 border-t border-[var(--color-border)]">
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-stretch">
+          {/* Search toggle - only show if server has search configured */}
+          {serverSearchConfig?.enabled && (
+            <button
+              type="button"
+              onClick={() => setSearchEnabled(!searchEnabled)}
+              disabled={isStreaming}
+              className={`w-11 flex-shrink-0 flex items-center justify-center rounded-lg border transition-colors ${
+                searchEnabled
+                  ? 'bg-blue-500/15 text-blue-400 border-blue-500/40'
+                  : 'bg-[var(--color-background)] text-[var(--color-text-secondary)] border-[var(--color-border)] hover:border-blue-500/40 hover:text-blue-400'
+              } disabled:opacity-50`}
+              title={searchEnabled ? 'Web search enabled' : 'Search the web'}
+              aria-label={searchEnabled ? 'Disable web search' : 'Enable web search'}
+            >
+              <SearchIcon size={18} />
+            </button>
+          )}
           <textarea
             ref={textareaRef}
             value={input}
@@ -483,22 +500,10 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
           <p className="text-xs text-[var(--color-text-secondary)]">
             Enter to send • Shift+Enter for newline
           </p>
-          {/* Search toggle - only show if server has search configured */}
-          {serverSearchConfig?.enabled && (
-            <button
-              type="button"
-              onClick={() => setSearchEnabled(!searchEnabled)}
-              disabled={isStreaming}
-              className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors ${
-                searchEnabled
-                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                  : 'bg-[var(--color-background)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:border-blue-500/30 hover:text-blue-400'
-              } disabled:opacity-50`}
-              title={searchEnabled ? 'Web search enabled for next message' : 'Click to enable web search'}
-            >
-              <SearchIcon size={12} />
-              <span>{searchEnabled ? 'Search ON' : 'Search'}</span>
-            </button>
+          {searchEnabled && serverSearchConfig?.enabled && (
+            <p className="text-xs text-blue-400">
+              Web search enabled
+            </p>
           )}
         </div>
       </div>
