@@ -14,6 +14,7 @@ import '@xyflow/react/dist/style.css';
 
 import { nodeTypes } from '../../nodes';
 import type { ConversationNodeType, ConversationNodeData } from '../../nodes/ConversationNode';
+import type { MergeNodeType, MergeNodeData } from '../../nodes/MergeNode';
 import { useConversationStore } from '../../store/conversationStore';
 import { getLayoutedElements } from '../../utils/layoutUtils';
 
@@ -87,32 +88,56 @@ function CanvasViewInner(): JSX.Element {
       }
     });
 
-    // Create React Flow nodes
-    const flowNodes: ConversationNodeType[] = sortedNodes.map((node) => ({
-      id: node.id,
-      type: 'conversation' as const,
-      position: { x: 0, y: 0 }, // Will be set by Dagre
-      data: {
-        role: node.role,
-        content: node.content,
-        isActive: node.id === activeNodeId,
-        isOnActivePath: activePathIds.has(node.id),
-        isSelected: selectedNodeIds.includes(node.id),
-        childCount: childCounts.get(node.id) || 0,
-      } as ConversationNodeData,
-    }));
+    // Create React Flow nodes (use merge type for nodes with multiple parents)
+    const flowNodes: (ConversationNodeType | MergeNodeType)[] = sortedNodes.map((node) => {
+      const isMergeNode = node.parentIds.length >= 2;
+
+      if (isMergeNode) {
+        return {
+          id: node.id,
+          type: 'merge' as const,
+          position: { x: 0, y: 0 }, // Will be set by Dagre
+          data: {
+            isActive: node.id === activeNodeId,
+            isOnActivePath: activePathIds.has(node.id),
+            isSelected: selectedNodeIds.includes(node.id),
+            parentCount: node.parentIds.length,
+          } as MergeNodeData,
+        };
+      }
+
+      return {
+        id: node.id,
+        type: 'conversation' as const,
+        position: { x: 0, y: 0 }, // Will be set by Dagre
+        data: {
+          role: node.role,
+          content: node.content,
+          isActive: node.id === activeNodeId,
+          isOnActivePath: activePathIds.has(node.id),
+          isSelected: selectedNodeIds.includes(node.id),
+          childCount: childCounts.get(node.id) || 0,
+        } as ConversationNodeData,
+      };
+    });
 
     // Create edges from parent relationships (DAG support: one edge per parent)
-    const flowEdges: Edge[] = sortedNodes.flatMap((node) =>
-      node.parentIds.map((parentId) => ({
+    const flowEdges: Edge[] = sortedNodes.flatMap((node) => {
+      const isMergeNode = node.parentIds.length >= 2;
+
+      return node.parentIds.map((parentId) => ({
         id: `e-${parentId}-${node.id}`,
         source: parentId,
         target: node.id,
-        className: activePathIds.has(node.id) && activePathIds.has(parentId)
-          ? 'stroke-[var(--color-accent)]'
-          : 'stroke-[var(--color-border)] opacity-50',
-      }))
-    );
+        className: isMergeNode
+          ? activePathIds.has(node.id) && activePathIds.has(parentId)
+            ? 'stroke-amber-500'
+            : 'stroke-amber-400 opacity-50'
+          : activePathIds.has(node.id) && activePathIds.has(parentId)
+            ? 'stroke-[var(--color-accent)]'
+            : 'stroke-[var(--color-border)] opacity-50',
+      }));
+    });
 
     // Apply Dagre layout
     return getLayoutedElements(flowNodes, flowEdges);

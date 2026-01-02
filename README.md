@@ -2,6 +2,8 @@
 
 A visual conversation tree interface for interacting with Large Language Models. This application displays LLM conversations as an interactive node graph, enabling branching conversations and merging multiple conversation paths.
 
+![Node Map LLM UI Screenshot](screenshot.png)
+
 ## Features
 
 - **Visual Conversation Tree**: See your entire conversation history as an interactive directed acyclic graph (DAG)

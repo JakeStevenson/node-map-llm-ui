@@ -1,6 +1,5 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
-import { BranchIcon } from '../components/icons';
 
 export interface ConversationNodeData extends Record<string, unknown> {
   role: 'user' | 'assistant';
@@ -16,7 +15,6 @@ export type ConversationNodeType = Node<ConversationNodeData, 'conversation'>;
 function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNodeType>): JSX.Element {
   const { role, content, isActive, isOnActivePath, isSelected, childCount } = data;
   const isUser = role === 'user';
-  const hasBranches = childCount > 1;
   const hasChildren = childCount > 0;
 
   // Truncate long content for display (keep short to prevent layout issues)
@@ -68,13 +66,6 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
         </div>
       </div>
 
-      {/* Branch indicator badge */}
-      {hasBranches && (
-        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 translate-y-full flex items-center gap-0.5 px-1.5 py-0.5 bg-[var(--color-accent)] text-white text-[10px] font-medium rounded-full">
-          <BranchIcon size={10} strokeWidth={2.5} />
-          <span>{childCount}</span>
-        </div>
-      )}
 
       {/* Branch hint when selected on a node with children */}
       {selected && hasChildren && !isActive && (
