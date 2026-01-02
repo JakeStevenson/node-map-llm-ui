@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3002:3000"
+    volumes:
+      - node-map-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - DB_PATH=/app/data/conversations.db
+      - PORT=3000
+    restart: unless-stopped
+
+volumes:
+  node-map-data:
+    driver: local

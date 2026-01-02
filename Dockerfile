@@ -2,23 +2,34 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Install build dependencies for better-sqlite3
+RUN apk add --no-cache python3 make g++
+
 # Copy package files
 COPY package*.json ./
 
 # Install dependencies
 RUN npm ci
 
+# Remove build dependencies to reduce image size
+RUN apk del python3 make g++
+
 # Copy source code
 COPY . .
 
-# Build the application
-RUN npm run build
+# Build frontend and server
+RUN npm run build && npm run build:server
 
-# Install serve globally
-RUN npm install -g serve
+# Create data directory for SQLite
+RUN mkdir -p /app/data
 
 # Expose port 3000
 EXPOSE 3000
 
-# Serve the built application
-CMD ["serve", "-s", "dist", "-l", "3000"]
+# Set environment variables
+ENV NODE_ENV=production
+ENV DB_PATH=/app/data/conversations.db
+ENV PORT=3000
+
+# Run Express server (serves both API and static files)
+CMD ["node", "dist-server/index.js"]

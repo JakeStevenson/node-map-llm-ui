@@ -3,6 +3,7 @@ import { CanvasView } from './components/Canvas';
 import { ChatSidebar } from './components/ChatSidebar';
 import { SettingsModal } from './components/Settings';
 import { ChatsModal } from './components/Chats';
+import { useConversationStore } from './store/conversationStore';
 
 const MIN_VIEWPORT_WIDTH = 1024;
 const MIN_SIDEBAR_WIDTH = 280;
@@ -47,6 +48,18 @@ export default function App(): JSX.Element {
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth);
   const [isResizing, setIsResizing] = useState(false);
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  // Store initialization
+  const isInitialized = useConversationStore((state) => state.isInitialized);
+  const isLoading = useConversationStore((state) => state.isLoading);
+  const initFromApi = useConversationStore((state) => state.initFromApi);
+
+  // Initialize store from API on mount
+  useEffect(() => {
+    if (!isInitialized && !isLoading) {
+      initFromApi();
+    }
+  }, [isInitialized, isLoading, initFromApi]);
 
   useEffect(() => {
     const handleResize = (): void => {
@@ -122,6 +135,18 @@ export default function App(): JSX.Element {
 
   if (!isDesktop) {
     return <DesktopRequiredMessage />;
+  }
+
+  // Show loading state while initializing from API
+  if (!isInitialized) {
+    return (
+      <div className="h-full flex items-center justify-center bg-[var(--color-background)]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-accent)] mx-auto mb-4"></div>
+          <p className="text-[var(--color-text-secondary)]">Loading conversations...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
