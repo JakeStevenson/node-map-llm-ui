@@ -3,7 +3,7 @@ import { CanvasView } from './components/Canvas';
 import { ChatSidebar } from './components/ChatSidebar';
 import { SettingsModal } from './components/Settings';
 import { ChatsModal } from './components/Chats';
-import { useConversationStore } from './store/conversationStore';
+import { useConversationStore, hasPendingSyncs } from './store/conversationStore';
 
 const MIN_VIEWPORT_WIDTH = 1024;
 const MIN_SIDEBAR_WIDTH = 280;
@@ -115,6 +115,20 @@ export default function App(): JSX.Element {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Warn user if they try to leave with pending syncs
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasPendingSyncs()) {
+        e.preventDefault();
+        // Modern browsers ignore custom messages, but we set one anyway
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
   const handleOpenSettings = useCallback(() => {

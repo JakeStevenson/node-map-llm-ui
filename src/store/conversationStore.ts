@@ -190,6 +190,82 @@ const syncInBackground = (action: () => Promise<unknown>) => {
   });
 };
 
+// Track local-to-server chat ID mappings and pending syncs
+const chatIdMap = new Map<string, string>(); // localId -> serverId
+const pendingChatSyncs = new Map<string, Promise<string>>();
+const knownServerChats = new Set<string>(); // IDs known to exist on server
+
+// Track node syncs to ensure parent nodes are synced before children
+const pendingNodeSyncs = new Map<string, Promise<void>>();
+const syncedNodes = new Set<string>(); // Node IDs known to exist on server
+
+// Check if there are any pending syncs (chat or node)
+export const hasPendingSyncs = (): boolean => {
+  return pendingChatSyncs.size > 0 || pendingNodeSyncs.size > 0;
+};
+
+// Wait for all pending syncs to complete
+export const waitForAllSyncs = async (): Promise<void> => {
+  const allPromises: Promise<unknown>[] = [
+    ...Array.from(pendingChatSyncs.values()),
+    ...Array.from(pendingNodeSyncs.values()),
+  ];
+  if (allPromises.length > 0) {
+    await Promise.all(allPromises);
+  }
+};
+
+// Mark a chat ID as known to exist on server (called after loading from API)
+const markChatAsSynced = (chatId: string) => {
+  knownServerChats.add(chatId);
+};
+
+// Mark node IDs as synced (called when loading nodes from API)
+const markNodeAsSynced = (nodeId: string) => {
+  syncedNodes.add(nodeId);
+};
+
+// Wait for a node to be synced to the server (returns immediately if already synced)
+const waitForNodeSync = async (nodeId: string | null): Promise<void> => {
+  if (!nodeId) return;
+  if (syncedNodes.has(nodeId)) return;
+
+  const pending = pendingNodeSyncs.get(nodeId);
+  if (pending) {
+    await pending;
+  }
+};
+
+// Ensure chat exists on server, returns the server chat ID
+const ensureChatSynced = async (localChatId: string, chatName: string): Promise<string> => {
+  // If this chat is known to exist on server, use it directly
+  if (knownServerChats.has(localChatId)) {
+    return localChatId;
+  }
+
+  // If we already have a server ID mapping for this local ID, return it
+  const existingServerId = chatIdMap.get(localChatId);
+  if (existingServerId) {
+    return existingServerId;
+  }
+
+  // If there's already a pending sync for this chat, wait for it
+  const pending = pendingChatSyncs.get(localChatId);
+  if (pending) {
+    return pending;
+  }
+
+  // Create the chat on the server
+  const syncPromise = api.createChat(chatName).then((created) => {
+    chatIdMap.set(localChatId, created.id);
+    knownServerChats.add(created.id);
+    pendingChatSyncs.delete(localChatId);
+    return created.id;
+  });
+  pendingChatSyncs.set(localChatId, syncPromise);
+  return syncPromise;
+};
+
 export const useConversationStore = create<ConversationState>()((set, get) => ({
   // Initial state
   isInitialized: false,
@@ -216,6 +292,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       if (chatSummaries.length === 0) {
         // No chats exist, create a new one
         const newChat = await api.createChat('Untitled');
+        markChatAsSynced(newChat.id); // Mark as known on server
         set({
           chats: [{
             id: newChat.id,
@@ -234,9 +311,14 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           isInitialized: true,
         });
       } else {
+        // Mark all chats as known on server
+        chatSummaries.forEach(c => markChatAsSynced(c.id));
         // Load the most recent chat
         const mostRecentId = chatSummaries[0].id;
         const chatDetail = await api.fetchChat(mostRecentId);
+
+        // Mark all loaded nodes as synced
+        chatDetail.nodes.forEach(n => markNodeAsSynced(n.id));
 
         // Create lightweight chat list
         const chats: Chat[] = chatSummaries.map((c) => ({
@@ -331,6 +413,9 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       set({ isLoading: true });
       try {
         const chatDetail = await api.fetchChat(chatId);
+        // Mark all loaded nodes as synced
+        chatDetail.nodes.forEach(n => markNodeAsSynced(n.id));
+
         const path = chatDetail.activeNodeId
           ? getPathToNodeHelper(chatDetail.activeNodeId, chatDetail.nodes)
           : [];
@@ -478,11 +563,22 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       // Sync: create chat then add node
       syncInBackground(async () => {
         const created = await api.createChat(newChat.name);
+
+        // Update local state with server ID
+        set((state) => ({
+          chats: state.chats.map((c) =>
+            c.id === newChat.id ? { ...c, id: created.id } : c
+          ),
+          activeChatId: state.activeChatId === newChat.id ? created.id : state.activeChatId,
+        }));
+
         await api.createNode(created.id, {
+          id,
           role,
           content,
           parentIds: parentId ? [parentId] : [],
         });
+        await api.updateChat(created.id, { activeNodeId: id });
       });
 
       return id;
@@ -507,15 +603,38 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       error: null,
     });
 
-    // Sync to API in background
-    syncInBackground(async () => {
-      await api.createNode(activeChatId, {
+    // Sync to API in background - ensure chat and parent node exist first
+    const nodeSyncPromise = (async () => {
+      const serverChatId = await ensureChatSynced(activeChatId, chatName);
+
+      // Update local state if server assigned a different ID
+      if (serverChatId !== activeChatId) {
+        set((state) => ({
+          chats: state.chats.map((c) =>
+            c.id === activeChatId ? { ...c, id: serverChatId } : c
+          ),
+          activeChatId: state.activeChatId === activeChatId ? serverChatId : state.activeChatId,
+        }));
+      }
+
+      // Wait for parent node to be synced first
+      await waitForNodeSync(parentId);
+
+      await api.createNode(serverChatId, {
+        id,
         role,
         content,
         parentIds: parentId ? [parentId] : [],
       });
-      await api.updateChat(activeChatId, { activeNodeId: id });
-    });
+      await api.updateChat(serverChatId, { activeNodeId: id });
+
+      // Mark this node as synced
+      syncedNodes.add(id);
+      pendingNodeSyncs.delete(id);
+    })();
+
+    pendingNodeSyncs.set(id, nodeSyncPromise);
+    syncInBackground(() => nodeSyncPromise);
 
     return id;
   },
@@ -559,17 +678,39 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       error: null,
     });
 
-    // Sync to API
+    // Sync to API - ensure chat and parent nodes exist first
     if (activeChatId) {
-      syncInBackground(async () => {
-        await api.createNode(activeChatId, {
+      const nodeSyncPromise = (async () => {
+        const serverChatId = await ensureChatSynced(activeChatId, chatName);
+
+        if (serverChatId !== activeChatId) {
+          set((state) => ({
+            chats: state.chats.map((c) =>
+              c.id === activeChatId ? { ...c, id: serverChatId } : c
+            ),
+            activeChatId: state.activeChatId === activeChatId ? serverChatId : state.activeChatId,
+          }));
+        }
+
+        // Wait for all parent nodes to be synced first
+        await Promise.all(validParents.map(pid => waitForNodeSync(pid)));
+
+        await api.createNode(serverChatId, {
+          id,
           role: 'user',
           content: '',
           parentIds: validParents,
           branchSummaries,
         });
-        await api.updateChat(activeChatId, { activeNodeId: id });
-      });
+        await api.updateChat(serverChatId, { activeNodeId: id });
+
+        // Mark this node as synced
+        syncedNodes.add(id);
+        pendingNodeSyncs.delete(id);
+      })();
+
+      pendingNodeSyncs.set(id, nodeSyncPromise);
+      syncInBackground(() => nodeSyncPromise);
     }
 
     return id;

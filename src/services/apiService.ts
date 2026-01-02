@@ -21,6 +21,7 @@ export interface ChatDetail {
 }
 
 export interface CreateNodeRequest {
+  id?: string;  // Optional - if provided, server will use this ID
   role: 'user' | 'assistant';
   content: string;
   parentIds: string[];

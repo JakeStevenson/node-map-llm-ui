@@ -210,9 +210,10 @@ router.delete('/:id', (req: Request, res: Response) => {
 // POST /api/chats/:chatId/nodes - Add node to chat
 router.post('/:chatId/nodes', (req: Request, res: Response) => {
   try {
-    const { role, content, parentIds = [], branchSummaries, treeId = 'main' } = req.body;
+    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main' } = req.body;
     const chatId = req.params.chatId;
-    const id = generateId();
+    // Use provided ID if given (allows frontend to maintain ID consistency)
+    const id = providedId || generateId();
     const now = Date.now();
 
     // Verify chat exists
