@@ -187,7 +187,6 @@ export async function generateBranchSummary(
   messages: Message[]
 ): Promise<string> {
   const { endpoint, apiKey, model } = config;
-  console.log('[Summary] Config:', { endpoint, model, hasApiKey: !!apiKey, messageCount: messages.length });
 
   // Helper to create fallback summary from messages
   const getFallbackSummary = (): string => {
@@ -246,8 +245,6 @@ Summary:`,
   const body = JSON.stringify(requestBody);
 
   try {
-    console.log('[Summary] Calling API:', url);
-    console.log('[Summary] Request body:', requestBody);
     const response = await fetch(url, {
       method: 'POST',
       headers,
@@ -255,13 +252,10 @@ Summary:`,
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[Summary] API error:', response.status, errorText);
       return getFallbackSummary();
     }
 
     const data = await response.json();
-    console.log('[Summary] API response:', JSON.stringify(data, null, 2));
 
     // Handle multiple response formats (OpenAI, Ollama, LM Studio, reasoning models, etc.)
     let summary: string | undefined;
@@ -302,19 +296,14 @@ Summary:`,
       summary = data.response.trim();
     }
 
-    console.log('[Summary] Extracted summary:', summary);
-
     // If we got a valid summary, use it (truncated if needed)
     if (summary && summary.length > 0) {
-      console.log('[Summary] Using LLM summary');
       return summary.length > 150 ? summary.substring(0, 147) + '...' : summary;
     }
 
     // Empty response from API, use fallback
-    console.warn('[Summary] Empty response, using fallback');
     return getFallbackSummary();
-  } catch (err) {
-    console.error('[Summary] Generation error:', err);
+  } catch {
     return getFallbackSummary();
   }
 }

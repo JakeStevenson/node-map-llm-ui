@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { useConversationStore, createUserMessage } from '../../store/conversationStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { sendMessage, generateBranchSummary } from '../../services/llmService';
+import { BranchIcon } from '../icons';
 import type { BranchSummary } from '../../types';
 
 interface ChatSidebarProps {
@@ -183,19 +184,15 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
       // Generate summaries for each parent branch in parallel
       const summaryPromises = selectedNodeIds.map(async (nodeId): Promise<BranchSummary> => {
         const messages = getMessagesForNode(nodeId);
-        console.log(`[Merge] Node ${nodeId} has ${messages.length} messages:`, messages);
         const summary = await generateBranchSummary({ endpoint, apiKey, model }, messages);
-        console.log(`[Merge] Summary for node ${nodeId}:`, summary);
         return { nodeId, summary };
       });
 
       const branchSummaries = await Promise.all(summaryPromises);
-      console.log('[Merge] All summaries:', branchSummaries);
 
       // Create merge node with summaries
       createMergeNode(selectedNodeIds, branchSummaries);
-    } catch (err) {
-      console.error('Error generating summaries:', err);
+    } catch {
       // Still create merge node without summaries on error
       createMergeNode(selectedNodeIds);
     } finally {
@@ -577,24 +574,3 @@ function LoadingSpinner(): JSX.Element {
   );
 }
 
-// Branch icon (for summary cards)
-function BranchIcon(): JSX.Element {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="6" y1="3" x2="6" y2="15" />
-      <circle cx="18" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <path d="M18 9a9 9 0 0 1-9 9" />
-    </svg>
-  );
-}

@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
+import { BranchIcon } from '../components/icons';
 
 export interface ConversationNodeData extends Record<string, unknown> {
   role: 'user' | 'assistant';
@@ -70,7 +71,7 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
       {/* Branch indicator badge */}
       {hasBranches && (
         <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 translate-y-full flex items-center gap-0.5 px-1.5 py-0.5 bg-[var(--color-accent)] text-white text-[10px] font-medium rounded-full">
-          <BranchIcon />
+          <BranchIcon size={10} strokeWidth={2.5} />
           <span>{childCount}</span>
         </div>
       )}
@@ -93,24 +94,3 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
 }
 
 export const ConversationNode = memo(ConversationNodeComponent);
-
-// Branch icon (git branch style)
-function BranchIcon(): JSX.Element {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="6" y1="3" x2="6" y2="15" />
-      <circle cx="18" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <path d="M18 9a9 9 0 0 1-9 9" />
-    </svg>
-  );
-}

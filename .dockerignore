@@ -1,0 +1,35 @@
+# Dependencies (143MB)
+node_modules
+
+# Build output (rebuilt in container)
+dist
+
+# Git
+.git
+.gitignore
+.github
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment and secrets
+.env*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Documentation (not needed for build)
+*.md
+LICENSE
+
+# Docker files (not needed inside build context)
+Dockerfile
+.dockerignore
+
+# OS files
+.DS_Store
+Thumbs.db
