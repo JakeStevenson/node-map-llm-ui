@@ -116,6 +116,16 @@ export async function deleteNode(id: string): Promise<void> {
   }
 }
 
+// Clear all nodes from a chat (but keep the chat)
+export async function clearChatNodes(chatId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/chats/${chatId}/nodes`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to clear chat nodes: ${res.status}`);
+  }
+}
+
 // Health check
 export async function healthCheck(): Promise<boolean> {
   try {

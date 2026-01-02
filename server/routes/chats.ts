@@ -298,4 +298,33 @@ router.delete('/nodes/:id', (req: Request, res: Response) => {
   }
 });
 
+// DELETE /api/chats/:chatId/nodes - Clear all nodes from a chat
+router.delete('/:chatId/nodes', (req: Request, res: Response) => {
+  try {
+    const chatId = req.params.chatId;
+
+    // Verify chat exists
+    const chat = db.prepare('SELECT id FROM chats WHERE id = ?').get(chatId);
+    if (!chat) {
+      return res.status(404).json({ error: 'Chat not found' });
+    }
+
+    const clearNodes = db.transaction(() => {
+      // Delete all nodes for this chat (cascade will handle node_parents and branch_summaries)
+      db.prepare('DELETE FROM conversation_nodes WHERE chat_id = ?').run(chatId);
+
+      // Reset active node and update timestamp
+      const now = Date.now();
+      db.prepare('UPDATE chats SET active_node_id = NULL, updated_at = ? WHERE id = ?').run(now, chatId);
+    });
+
+    clearNodes();
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error clearing chat nodes:', error);
+    res.status(500).json({ error: 'Failed to clear chat nodes' });
+  }
+});
+
 export default router;

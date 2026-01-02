@@ -789,7 +789,10 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       error: null,
     });
 
-    // Note: This doesn't sync to API - would need a clear endpoint
+    // Sync to server - clear all nodes from this chat
+    if (activeChatId) {
+      syncInBackground(() => api.clearChatNodes(activeChatId));
+    }
   },
 
   // Legacy: Add message (creates node in tree)
