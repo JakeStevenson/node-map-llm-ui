@@ -504,3 +504,162 @@ Summary:`,
     return getFallbackSummary();
   }
 }
+
+/**
+ * Generate a summary of a conversation path for context compression
+ * Used by summary nodes to replace full conversation history
+ */
+export async function generatePathSummary(
+  config: LLMConfig,
+  messages: Message[]
+): Promise<string> {
+  const { endpoint, apiKey, model } = config;
+
+  // Helper to create fallback summary from messages
+  const getFallbackSummary = (): string => {
+    const userCount = messages.filter((m) => m.role === 'user').length;
+    const assistantCount = messages.filter((m) => m.role === 'assistant').length;
+    return `Summary of ${messages.length} messages (${userCount} user, ${assistantCount} assistant)`;
+  };
+
+  if (!endpoint || !model || messages.length === 0) {
+    console.warn('generatePathSummary: Missing required config or no messages', {
+      hasEndpoint: !!endpoint,
+      hasModel: !!model,
+      messageCount: messages.length
+    });
+    return getFallbackSummary();
+  }
+
+  const url = `${endpoint.replace(/\/$/, '')}/chat/completions`;
+
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  // Build conversation context for summary
+  const conversationText = messages
+    .filter((m) => m.content.trim())
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n\n');
+
+  if (!conversationText) {
+    return getFallbackSummary();
+  }
+
+  const summaryPrompt = {
+    role: 'user',
+    content: `You are creating a detailed summary that will replace the full conversation history for future messages in this thread. This summary is critical - any information you omit will be lost forever.
+
+Analyze this conversation and create a comprehensive summary that preserves:
+
+CONTEXT & PURPOSE:
+- What was the user trying to accomplish or explore?
+- What was the starting situation, challenge, or question?
+- What were the main goals or desired outcomes?
+
+KEY CONTENT:
+- Main topics, themes, or areas explored
+- Important questions asked and their answers
+- Specific details: names, numbers, examples, references
+- Ideas, approaches, or options discussed
+- Any frameworks, models, or structures proposed
+
+IMPORTANT DETAILS:
+- Specific methods, tools, or resources mentioned
+- Design decisions, patterns, or approaches considered
+- Problems or challenges identified and how they were addressed
+- Reasoning behind key choices or recommendations
+
+OUTCOMES & NEXT STEPS:
+- Conclusions, decisions, or agreements reached
+- Plans, action items, or recommendations
+- What was learned or discovered
+- Any remaining questions or areas to explore further
+
+Write a thorough, detailed summary using multiple paragraphs. Include specific details - don't generalize. Aim for 1500-2000 characters to ensure nothing important is lost.
+
+CONVERSATION:
+${conversationText}
+
+DETAILED SUMMARY:`,
+  };
+
+  const requestBody = {
+    model,
+    messages: [summaryPrompt],
+    stream: false,
+    max_tokens: 2000,
+  };
+
+  const body = JSON.stringify(requestBody);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('generatePathSummary: LLM request failed', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText
+      });
+      return getFallbackSummary();
+    }
+
+    const data = await response.json();
+
+    // Handle multiple response formats
+    let summary: string | undefined;
+    const message = data.choices?.[0]?.message;
+
+    // OpenAI format
+    if (message?.content) {
+      summary = message.content.trim();
+    }
+    // Reasoning models
+    else if (message?.reasoning) {
+      const reasoning = message.reasoning as string;
+      const quotedMatch = reasoning.match(/"([^"]{10,200})"/);
+      if (quotedMatch) {
+        summary = quotedMatch[1].trim();
+      } else {
+        const sentences = reasoning.split(/[.!?]\s+/);
+        const lastMeaningful = sentences.filter(s => s.length > 20).pop();
+        if (lastMeaningful) {
+          summary = lastMeaningful.trim().substring(0, 200);
+        }
+      }
+    }
+    // Ollama format
+    else if (data.message?.content) {
+      summary = data.message.content.trim();
+    }
+    // Alternative formats
+    else if (data.content) {
+      summary = (typeof data.content === 'string' ? data.content : String(data.content)).trim();
+    }
+    else if (data.response) {
+      summary = data.response.trim();
+    }
+
+    // Return summary (no truncation - preserve all context)
+    if (summary && summary.length > 0) {
+      return summary;
+    }
+
+    console.warn('generatePathSummary: Could not extract summary from response', { data });
+    return getFallbackSummary();
+  } catch (error) {
+    console.error('generatePathSummary: Exception occurred', error);
+    return getFallbackSummary();
+  }
+}

@@ -20,6 +20,8 @@ interface ConversationNode {
   treeId: string;
   branchSummaries?: Array<{ nodeId: string; summary: string }>;
   searchMetadata?: SearchMetadata;
+  isSummary?: boolean;
+  summarizedNodeIds?: string[];
 }
 
 interface DbChatRow {
@@ -37,6 +39,8 @@ interface DbNodeRow {
   treeId: string;
   createdAt: number;
   searchMetadata: string | null;
+  isSummary: number;
+  summarizedNodeIds: string | null;
 }
 
 // Helper to generate IDs
@@ -79,7 +83,8 @@ router.get('/:id', (req: Request, res: Response) => {
     // Get nodes
     const nodes = db.prepare(`
       SELECT id, role, content, tree_id as treeId, created_at as createdAt,
-             search_metadata as searchMetadata
+             search_metadata as searchMetadata, is_summary as isSummary,
+             summarized_node_ids as summarizedNodeIds
       FROM conversation_nodes WHERE chat_id = ?
       ORDER BY created_at
     `).all(req.params.id) as DbNodeRow[];
@@ -115,7 +120,7 @@ router.get('/:id', (req: Request, res: Response) => {
       summaryMap.get(s.node_id)!.push({ nodeId: s.nodeId, summary: s.summary });
     }
 
-    // Assemble nodes with parentIds, branchSummaries, and searchMetadata
+    // Assemble nodes with parentIds, branchSummaries, searchMetadata, and summary fields
     const assembledNodes: ConversationNode[] = nodes.map((n) => ({
       id: n.id,
       role: n.role as 'user' | 'assistant',
@@ -125,6 +130,8 @@ router.get('/:id', (req: Request, res: Response) => {
       parentIds: parentMap.get(n.id) || [],
       branchSummaries: summaryMap.get(n.id),
       searchMetadata: n.searchMetadata ? JSON.parse(n.searchMetadata) : undefined,
+      isSummary: n.isSummary === 1,
+      summarizedNodeIds: n.summarizedNodeIds ? JSON.parse(n.summarizedNodeIds) : undefined,
     }));
 
     res.json({
@@ -221,7 +228,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 // POST /api/chats/:chatId/nodes - Add node to chat
 router.post('/:chatId/nodes', (req: Request, res: Response) => {
   try {
-    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main', searchMetadata } = req.body;
+    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main', searchMetadata, isSummary, summarizedNodeIds } = req.body;
     const chatId = req.params.chatId;
     // Use provided ID if given (allows frontend to maintain ID consistency)
     const id = providedId || generateId();
@@ -236,9 +243,19 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
     const insertNode = db.transaction(() => {
       // Insert node
       db.prepare(`
-        INSERT INTO conversation_nodes (id, chat_id, role, content, tree_id, created_at, search_metadata)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, chatId, role, content, treeId, now, searchMetadata ? JSON.stringify(searchMetadata) : null);
+        INSERT INTO conversation_nodes (id, chat_id, role, content, tree_id, created_at, search_metadata, is_summary, summarized_node_ids)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        chatId,
+        role,
+        content,
+        treeId,
+        now,
+        searchMetadata ? JSON.stringify(searchMetadata) : null,
+        isSummary ? 1 : 0,
+        summarizedNodeIds ? JSON.stringify(summarizedNodeIds) : null
+      );
 
       // Insert parent relationships
       for (let i = 0; i < parentIds.length; i++) {
@@ -273,12 +290,49 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
       treeId,
       branchSummaries,
       searchMetadata,
+      isSummary,
+      summarizedNodeIds,
     };
 
     res.status(201).json(node);
   } catch (error) {
     console.error('Error creating node:', error);
     res.status(500).json({ error: 'Failed to create node' });
+  }
+});
+
+// PUT /api/chats/:chatId/nodes/:nodeId - Update node content
+router.put('/:chatId/nodes/:nodeId', (req: Request, res: Response) => {
+  try {
+    const { content } = req.body;
+    const { chatId, nodeId } = req.params;
+
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+
+    // Verify node exists and belongs to this chat
+    const node = db.prepare(`
+      SELECT id FROM conversation_nodes WHERE id = ? AND chat_id = ?
+    `).get(nodeId, chatId);
+
+    if (!node) {
+      return res.status(404).json({ error: 'Node not found' });
+    }
+
+    // Update node content
+    const now = Date.now();
+    db.prepare(`
+      UPDATE conversation_nodes SET content = ? WHERE id = ?
+    `).run(content, nodeId);
+
+    // Update chat timestamp
+    db.prepare('UPDATE chats SET updated_at = ? WHERE id = ?').run(now, chatId);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating node:', error);
+    res.status(500).json({ error: 'Failed to update node' });
   }
 });
 

@@ -63,6 +63,11 @@ export interface ConversationNode {
   treeId: string;
   branchSummaries?: BranchSummary[];  // Only present on merge nodes
   searchMetadata?: SearchMetadata;     // Present when web search was used
+  // Context management fields
+  isSummary?: boolean;                 // Flag for summary nodes
+  summarizedNodeIds?: string[];        // Original nodes this summary replaces
+  excludeFromContext?: boolean;        // Skip when building LLM context
+  estimatedTokens?: number;            // Cached token count
 }
 
 // Streaming Types
@@ -94,4 +99,20 @@ export interface LLMError {
   type: 'network' | 'api' | 'auth' | 'rate_limit' | 'unknown';
   message: string;
   status?: number;
+}
+
+// Context Management Types
+export interface ModelContextConfig {
+  contextWindow: number;      // Total tokens the model can handle
+  reservedTokens: number;     // Reserve for system prompt + completion
+  warningThreshold: number;   // Show warning at this % (e.g., 0.8 = 80%)
+  criticalThreshold: number;  // Show critical warning at this % (e.g., 0.95 = 95%)
+}
+
+export interface ContextStatus {
+  currentTokens: number;      // Current token usage
+  maxTokens: number;          // Maximum available (contextWindow - reserved)
+  percentage: number;         // Usage percentage (0-1)
+  state: 'normal' | 'warning' | 'critical';
+  availableTokens: number;    // Remaining tokens available
 }

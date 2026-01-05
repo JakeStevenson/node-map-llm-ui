@@ -28,6 +28,8 @@ export interface CreateNodeRequest {
   treeId?: string;
   branchSummaries?: BranchSummary[];
   searchMetadata?: SearchMetadata;
+  isSummary?: boolean;
+  summarizedNodeIds?: string[];
 }
 
 // Fetch all chats (lightweight list without nodes)
@@ -113,6 +115,22 @@ export async function deleteNode(id: string): Promise<void> {
   });
   if (!res.ok) {
     throw new Error(`Failed to delete node: ${res.status}`);
+  }
+}
+
+// Update node content
+export async function updateNodeContent(
+  chatId: string,
+  nodeId: string,
+  content: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/chats/${chatId}/nodes/${nodeId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to update node content: ${res.status}`);
   }
 }
 

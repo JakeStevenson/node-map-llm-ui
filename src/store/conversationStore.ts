@@ -1,6 +1,8 @@
 import { create } from 'zustand';
-import type { Message, ConversationNode, BranchSummary, SearchMetadata } from '../types';
+import type { Message, ConversationNode, BranchSummary, SearchMetadata, ContextStatus } from '../types';
 import * as api from '../services/apiService';
+import { calculatePathContext, estimateTokens } from '../services/contextService';
+import { useSettingsStore } from './settingsStore';
 
 // Chat type for managing multiple conversations
 interface Chat {
@@ -52,6 +54,9 @@ interface ConversationState {
   // Tree Actions
   addNode: (role: 'user' | 'assistant', content: string, parentId: string | null, searchMetadata?: SearchMetadata) => string;
   createMergeNode: (parentIds: string[], branchSummaries?: BranchSummary[]) => string | null;
+  createSummaryNode: (nodeId: string, summaryContent?: string) => Promise<string | null>;
+  updateNodeContent: (nodeId: string, newContent: string) => Promise<void>;
+  deleteNode: (nodeId: string) => Promise<void>;
   selectNode: (nodeId: string | null) => void;
   toggleNodeSelection: (nodeId: string) => void;
   clearNodeSelection: () => void;
@@ -76,6 +81,7 @@ interface ConversationState {
   getActivePath: () => ConversationNode[];
   getMessagesForLLM: () => Message[];
   getMessagesForNode: (nodeId: string) => Message[];
+  getContextStatus: () => ContextStatus;
   validateMerge: (nodeIds: string[]) => { valid: boolean; error?: string };
 }
 
@@ -129,7 +135,12 @@ const getAllAncestorNodes = (
     const node = nodes.find((n) => n.id === currentId);
     if (node) {
       collected.set(currentId, node);
-      toVisit.push(...node.parentIds);
+
+      // Stop at summary nodes - they replace all ancestor context
+      // If this is a summary node, don't traverse to its parents
+      if (!node.isSummary) {
+        toVisit.push(...node.parentIds);
+      }
     }
   }
 
@@ -143,7 +154,7 @@ const buildMessagesForLLM = (
 ): Message[] => {
   const ancestorNodes = getAllAncestorNodes(nodeId, nodes);
   return ancestorNodes
-    .filter((node) => node.content.trim() !== '')
+    .filter((node) => node.content.trim() !== '' && !node.excludeFromContext)
     .map((node) => ({
       id: node.id,
       role: node.role,
@@ -545,6 +556,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       createdAt: Date.now(),
       treeId: 'main',
       searchMetadata,
+      estimatedTokens: estimateTokens(content), // Cache token count
     };
 
     const { nodes, chats, activeChatId, chatName } = get();
@@ -668,6 +680,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       createdAt: Date.now(),
       treeId: 'main',
       branchSummaries,
+      estimatedTokens: 0, // Merge nodes have no content
     };
 
     const newNodes = [...nodes, mergeNode];
@@ -725,6 +738,205 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     }
 
     return id;
+  },
+
+  createSummaryNode: async (nodeId, summaryContent) => {
+    const { nodes, chats, activeChatId, chatName } = get();
+
+    // Find the node to summarize up to
+    const targetNode = nodes.find((n) => n.id === nodeId);
+    if (!targetNode) {
+      console.error('Target node not found');
+      return null;
+    }
+
+    // Get the path from root to this node
+    const path = getAllAncestorNodes(nodeId, nodes);
+    const summarizedNodeIds = path.map((n) => n.id);
+
+    // Create placeholder summary content if not provided
+    const defaultSummary = `Summary of ${path.length} messages (${path.filter(n => n.role === 'user').length} user, ${path.filter(n => n.role === 'assistant').length} assistant)`;
+    const content = summaryContent || defaultSummary;
+
+    // Create the summary node
+    const id = generateId();
+    const summaryNode: ConversationNode = {
+      id,
+      parentIds: [nodeId],  // Child of the summarized node
+      role: 'assistant',    // Summary is from assistant
+      content,
+      createdAt: Date.now(),
+      treeId: 'main',
+      isSummary: true,
+      summarizedNodeIds,
+      estimatedTokens: estimateTokens(content), // Cache token count
+    };
+
+    const newNodes = [...nodes, summaryNode];
+    const newPath = getPathToNodeHelper(id, newNodes);
+
+    const updatedChats = chats.map((chat) =>
+      chat.id === activeChatId
+        ? { ...chat, nodes: newNodes, activeNodeId: id, name: chatName }
+        : chat
+    );
+
+    set({
+      chats: updatedChats,
+      nodes: newNodes,
+      activeNodeId: id,
+      selectedNodeId: id,
+      selectedNodeIds: [],
+      messages: buildMessagesFromPath(newPath),
+      error: null,
+    });
+
+    // Sync to API
+    if (activeChatId) {
+      const nodeSyncPromise = (async () => {
+        const serverChatId = await ensureChatSynced(activeChatId, chatName);
+
+        if (serverChatId !== activeChatId) {
+          set((state) => ({
+            chats: state.chats.map((c) =>
+              c.id === activeChatId ? { ...c, id: serverChatId } : c
+            ),
+            activeChatId: state.activeChatId === activeChatId ? serverChatId : state.activeChatId,
+          }));
+        }
+
+        // Wait for parent node to be synced
+        await waitForNodeSync(nodeId);
+
+        await api.createNode(serverChatId, {
+          id,
+          role: 'assistant',
+          content,
+          parentIds: [nodeId],
+          isSummary: true,
+          summarizedNodeIds,
+        });
+        await api.updateChat(serverChatId, { activeNodeId: id });
+
+        // Mark this node as synced
+        syncedNodes.add(id);
+        pendingNodeSyncs.delete(id);
+      })();
+
+      pendingNodeSyncs.set(id, nodeSyncPromise);
+      syncInBackground(() => nodeSyncPromise);
+    }
+
+    return id;
+  },
+
+  updateNodeContent: async (nodeId, newContent) => {
+    const { nodes, chats, activeChatId, activeNodeId } = get();
+
+    // Find the node to update
+    const targetNode = nodes.find((n) => n.id === nodeId);
+    if (!targetNode) {
+      console.error('Node not found');
+      return;
+    }
+
+    // Update the node content locally and recalculate tokens
+    const updatedNodes = nodes.map((n) =>
+      n.id === nodeId ? { ...n, content: newContent, estimatedTokens: estimateTokens(newContent) } : n
+    );
+
+    // Update messages if this affects the active path
+    const newMessages = activeNodeId
+      ? buildMessagesFromPath(getPathToNodeHelper(activeNodeId, updatedNodes))
+      : [];
+
+    const updatedChats = chats.map((chat) =>
+      chat.id === activeChatId
+        ? { ...chat, nodes: updatedNodes }
+        : chat
+    );
+
+    set({
+      chats: updatedChats,
+      nodes: updatedNodes,
+      messages: newMessages,
+    });
+
+    // Sync to API
+    if (activeChatId) {
+      const updatePromise = (async () => {
+        const serverChatId = await ensureChatSynced(activeChatId, get().chatName);
+
+        // Wait for node to be synced before updating
+        await waitForNodeSync(nodeId);
+
+        await api.updateNodeContent(serverChatId, nodeId, newContent);
+      })();
+
+      syncInBackground(() => updatePromise);
+    }
+  },
+
+  deleteNode: async (nodeId) => {
+    const { nodes, chats, activeChatId, activeNodeId } = get();
+
+    // Find all descendants recursively
+    const getAllDescendants = (id: string): string[] => {
+      const children = nodes.filter((n) => n.parentIds.includes(id));
+      const descendants = [id];
+      for (const child of children) {
+        descendants.push(...getAllDescendants(child.id));
+      }
+      return descendants;
+    };
+
+    const nodesToDelete = getAllDescendants(nodeId);
+
+    // Remove all nodes in the branch
+    const updatedNodes = nodes.filter((n) => !nodesToDelete.includes(n.id));
+
+    // Update active node if it was deleted
+    let newActiveNodeId = activeNodeId;
+    if (activeNodeId && nodesToDelete.includes(activeNodeId)) {
+      // Find a new active node (first available node, or null)
+      newActiveNodeId = updatedNodes.length > 0 ? updatedNodes[0].id : null;
+    }
+
+    // Update messages
+    const newMessages = newActiveNodeId
+      ? buildMessagesFromPath(getPathToNodeHelper(newActiveNodeId, updatedNodes))
+      : [];
+
+    const updatedChats = chats.map((chat) =>
+      chat.id === activeChatId
+        ? { ...chat, nodes: updatedNodes, activeNodeId: newActiveNodeId }
+        : chat
+    );
+
+    set({
+      chats: updatedChats,
+      nodes: updatedNodes,
+      activeNodeId: newActiveNodeId,
+      selectedNodeId: newActiveNodeId,
+      selectedNodeIds: [],
+      messages: newMessages,
+    });
+
+    // Sync to API - delete all nodes in the branch
+    if (activeChatId) {
+      const deletePromises = nodesToDelete.map(async (id) => {
+        await waitForNodeSync(id);
+        await api.deleteNode(id);
+      });
+
+      const deleteAllPromise = Promise.all(deletePromises);
+      syncInBackground(() => deleteAllPromise);
+
+      // Update active node if changed
+      if (newActiveNodeId !== activeNodeId) {
+        syncInBackground(() => api.updateChat(activeChatId, { activeNodeId: newActiveNodeId }));
+      }
+    }
   },
 
   selectNode: (nodeId) => {
@@ -905,6 +1117,47 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     const { nodes } = get();
     const path = getPathToNodeHelper(nodeId, nodes);
     return buildMessagesFromPath(path);
+  },
+
+  getContextStatus: () => {
+    const { activeNodeId, nodes } = get();
+    if (!activeNodeId) {
+      // Return empty status if no active node
+      return {
+        currentTokens: 0,
+        maxTokens: 4096,
+        percentage: 0,
+        state: 'normal' as const,
+        availableTokens: 4096,
+      };
+    }
+
+    // Get context config from settings store
+    const contextConfig = useSettingsStore.getState().getContextConfig();
+
+    // Get all ancestor nodes (including those excluded from context)
+    const ancestorNodes = getAllAncestorNodes(activeNodeId, nodes);
+
+    // Filter to only include nodes that will be sent to LLM
+    const includedNodes = ancestorNodes.filter(
+      (node) => node.content.trim() !== '' && !node.excludeFromContext
+    );
+
+    // Calculate context status
+    const status = calculatePathContext(includedNodes, contextConfig);
+
+    // Log warning if over limit
+    if (status.state === 'critical') {
+      console.warn(
+        `Context usage critical: ${status.currentTokens}/${status.maxTokens} tokens (${Math.round(status.percentage * 100)}%)`
+      );
+    } else if (status.state === 'warning') {
+      console.warn(
+        `Context usage warning: ${status.currentTokens}/${status.maxTokens} tokens (${Math.round(status.percentage * 100)}%)`
+      );
+    }
+
+    return status;
   },
 
   validateMerge: (nodeIds) => {

@@ -75,6 +75,39 @@ try {
   // Column already exists, ignore error
 }
 
+// Migration: Add context management columns if they don't exist
+try {
+  db.exec('ALTER TABLE conversation_nodes ADD COLUMN is_summary INTEGER DEFAULT 0');
+} catch {
+  // Column already exists, ignore error
+}
+
+try {
+  db.exec('ALTER TABLE conversation_nodes ADD COLUMN summarized_node_ids TEXT');
+} catch {
+  // Column already exists, ignore error
+}
+
+try {
+  db.exec('ALTER TABLE conversation_nodes ADD COLUMN exclude_from_context INTEGER DEFAULT 0');
+} catch {
+  // Column already exists, ignore error
+}
+
+try {
+  db.exec('ALTER TABLE conversation_nodes ADD COLUMN estimated_tokens INTEGER');
+} catch {
+  // Column already exists, ignore error
+}
+
+// Create indexes for context management queries
+try {
+  db.exec('CREATE INDEX IF NOT EXISTS idx_nodes_exclude_context ON conversation_nodes(exclude_from_context)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_nodes_is_summary ON conversation_nodes(is_summary)');
+} catch {
+  // Indexes already exist, ignore error
+}
+
 console.log(`Database initialized at ${DB_PATH}`);
 
 export default db;

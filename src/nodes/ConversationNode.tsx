@@ -10,14 +10,19 @@ export interface ConversationNodeData extends Record<string, unknown> {
   isSelected: boolean;  // Multi-select for merge feature
   childCount: number;
   hasSearchMetadata: boolean;  // Whether web search was used for this response
+  contextPercentage?: number;  // Context usage percentage for this path
 }
 
 export type ConversationNodeType = Node<ConversationNodeData, 'conversation'>;
 
 function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNodeType>): JSX.Element {
-  const { role, content, isActive, isOnActivePath, isSelected, childCount, hasSearchMetadata } = data;
+  const { role, content, isActive, isOnActivePath, isSelected, childCount, hasSearchMetadata, contextPercentage } = data;
   const isUser = role === 'user';
   const hasChildren = childCount > 0;
+
+  // Show context indicator when above 60% threshold
+  const showContextIndicator = contextPercentage !== undefined && contextPercentage >= 0.6;
+  const contextState = contextPercentage !== undefined && contextPercentage >= 0.95 ? 'critical' : contextPercentage !== undefined && contextPercentage >= 0.8 ? 'warning' : 'normal';
 
   // Truncate long content for display (keep short to prevent layout issues)
   const displayContent = content.length > 60
@@ -74,6 +79,25 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
             title="Web search was used"
           >
             <SearchIcon size={10} strokeWidth={2.5} className="text-white" />
+          </div>
+        )}
+
+        {/* Context indicator badge */}
+        {showContextIndicator && (
+          <div
+            className={`
+              absolute -top-1.5 ${hasSearchMetadata ? '-right-8' : '-right-1.5'}
+              px-1.5 py-0.5 rounded-full shadow-sm text-[9px] font-bold
+              ${contextState === 'critical'
+                ? 'bg-red-500 text-white'
+                : contextState === 'warning'
+                ? 'bg-yellow-500 text-white'
+                : 'bg-blue-400 text-white'
+              }
+            `}
+            title={`Context usage: ${Math.round(contextPercentage! * 100)}%`}
+          >
+            {Math.round(contextPercentage! * 100)}%
           </div>
         )}
       </div>

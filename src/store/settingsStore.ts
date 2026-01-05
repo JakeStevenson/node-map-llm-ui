@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { LLMConfig, LLMModel, WebSearchConfig, ServerSearchConfig } from '../types';
+import type { LLMConfig, LLMModel, WebSearchConfig, ServerSearchConfig, ModelContextConfig } from '../types';
+import { getModelConfig } from '../services/contextService';
+import { getModelContextWindow } from '../services/modelInfoService';
 
 interface SettingsState {
   // Config
@@ -15,6 +17,9 @@ interface SettingsState {
   serverSearchConfig: ServerSearchConfig | null;
   isLoadingServerSearch: boolean;
 
+  // Context Management Config
+  contextConfig: ModelContextConfig;
+
   // Available models from endpoint
   availableModels: LLMModel[];
   isLoadingModels: boolean;
@@ -23,7 +28,7 @@ interface SettingsState {
   // Actions
   setEndpoint: (endpoint: string) => void;
   setApiKey: (apiKey: string) => void;
-  setModel: (model: string) => void;
+  setModel: (model: string) => Promise<void>;
   updateConfig: (config: Partial<Pick<SettingsState, 'endpoint' | 'apiKey' | 'model'>>) => void;
   setAvailableModels: (models: LLMModel[]) => void;
   setIsLoadingModels: (loading: boolean) => void;
@@ -40,6 +45,12 @@ interface SettingsState {
   setServerSearchConfig: (config: ServerSearchConfig | null) => void;
   setIsLoadingServerSearch: (loading: boolean) => void;
   fetchServerSearchConfig: () => Promise<void>;
+
+  // Context Management Actions
+  setContextConfig: (config: ModelContextConfig) => void;
+  updateContextConfig: (config: Partial<ModelContextConfig>) => void;
+  getContextConfig: () => ModelContextConfig;
+  updateContextForModel: (modelName: string) => void;
 }
 
 const DEFAULT_ENDPOINT = '';
@@ -50,6 +61,13 @@ const DEFAULT_WEB_SEARCH: WebSearchConfig = {
   maxResults: 5,
 };
 
+const DEFAULT_CONTEXT_CONFIG: ModelContextConfig = {
+  contextWindow: 4096,
+  reservedTokens: 512,
+  warningThreshold: 0.8,
+  criticalThreshold: 0.95,
+};
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
@@ -58,6 +76,7 @@ export const useSettingsStore = create<SettingsState>()(
       apiKey: '',
       model: '',
       webSearch: DEFAULT_WEB_SEARCH,
+      contextConfig: DEFAULT_CONTEXT_CONFIG,
       serverSearchConfig: null,
       isLoadingServerSearch: false,
       availableModels: [],
@@ -73,7 +92,28 @@ export const useSettingsStore = create<SettingsState>()(
         }
       },
       setApiKey: (apiKey) => set({ apiKey }),
-      setModel: (model) => set({ model }),
+      setModel: async (model) => {
+        set({ model });
+
+        // Auto-detect context window for the new model
+        const { endpoint, apiKey } = get();
+        if (endpoint && model) {
+          try {
+            const modelInfo = await getModelContextWindow(endpoint, model, apiKey);
+            if (modelInfo.contextWindow) {
+              set((state) => ({
+                contextConfig: {
+                  ...state.contextConfig,
+                  contextWindow: modelInfo.contextWindow,
+                },
+              }));
+              console.log(`Auto-detected context window: ${modelInfo.contextWindow} tokens (source: ${modelInfo.source})`);
+            }
+          } catch (error) {
+            console.warn('Failed to auto-detect context window:', error);
+          }
+        }
+      },
       updateConfig: (config) => set(config),
       setAvailableModels: (models) => set({ availableModels: models }),
       setIsLoadingModels: (loading) => set({ isLoadingModels: loading }),
@@ -130,6 +170,21 @@ export const useSettingsStore = create<SettingsState>()(
           set({ isLoadingServerSearch: false });
         }
       },
+
+      // Context Management Actions
+      setContextConfig: (config) => set({ contextConfig: config }),
+
+      updateContextConfig: (config) =>
+        set((state) => ({
+          contextConfig: { ...state.contextConfig, ...config },
+        })),
+
+      getContextConfig: () => get().contextConfig,
+
+      updateContextForModel: (modelName) => {
+        const modelConfig = getModelConfig(modelName);
+        set({ contextConfig: modelConfig });
+      },
     }),
     {
       name: 'node-map-settings',
@@ -138,6 +193,7 @@ export const useSettingsStore = create<SettingsState>()(
         apiKey: state.apiKey,
         model: state.model,
         webSearch: state.webSearch,
+        contextConfig: state.contextConfig,
       }),
     }
   )

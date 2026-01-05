@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConversationStore, createUserMessage } from '../../store/conversationStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { sendMessageWithSearch, generateBranchSummary } from '../../services/llmService';
 import { BranchIcon, SearchIcon } from '../icons';
+import { ContextIndicator } from '../ContextIndicator';
 import type { BranchSummary, SearchMetadata } from '../../types';
+import { useDebouncedValue } from '../../utils/debounce';
 
 interface ChatSidebarProps {
   className?: string;
@@ -48,6 +50,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     clearNodeSelection,
     getMessagesForLLM,
     getMessagesForNode,
+    getContextStatus,
     navigateToNode,
     validateMerge,
   } = useConversationStore();
@@ -58,14 +61,30 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
 
   const showMergeBar = selectedNodeIds.length >= 2;
 
-  const { endpoint, apiKey, model, webSearch, serverSearchConfig, fetchServerSearchConfig } = useSettingsStore();
+  const { endpoint, apiKey, model, webSearch, serverSearchConfig, fetchServerSearchConfig, setModel } = useSettingsStore();
 
   // Fetch server search config on mount
   useEffect(() => {
     fetchServerSearchConfig();
   }, [fetchServerSearchConfig]);
 
+  // Auto-detect context window on mount if model is set
+  useEffect(() => {
+    if (endpoint && model) {
+      // Trigger context window detection by re-setting the model
+      setModel(model);
+    }
+  }, []);  // Only run once on mount
+
   const isConfigured = endpoint && model;
+
+  // Calculate context status
+  const contextStatus = useMemo(() => {
+    return getContextStatus();
+  }, [getContextStatus, activeNodeId, nodes]);
+
+  // Debounce context status updates for smoother UI during rapid changes
+  const debouncedContextStatus = useDebouncedValue(contextStatus, 150);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -284,6 +303,13 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
           </button>
         </div>
       </header>
+
+      {/* Context Indicator - only shown when approaching limits */}
+      {isConfigured && messages.length > 0 && debouncedContextStatus.percentage >= 0.6 && (
+        <div className="px-4 py-1.5 border-b border-[var(--color-border)]/50">
+          <ContextIndicator contextStatus={debouncedContextStatus} />
+        </div>
+      )}
 
       {/* Config Warning */}
       {!isConfigured && (
