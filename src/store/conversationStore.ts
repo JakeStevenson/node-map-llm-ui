@@ -60,6 +60,7 @@ interface ConversationState {
   createMergeNode: (parentIds: string[], branchSummaries?: BranchSummary[]) => string | null;
   createSummaryNode: (nodeId: string, summaryContent?: string) => Promise<string | null>;
   updateNodeContent: (nodeId: string, newContent: string) => Promise<void>;
+  editNodeAndBranch: (nodeId: string, newContent: string, shouldBranch: boolean) => string | null;
   deleteNode: (nodeId: string) => Promise<void>;
   selectNode: (nodeId: string | null) => void;
   toggleNodeSelection: (nodeId: string) => void;
@@ -1034,6 +1035,99 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
       syncInBackground(nodeId, 'node', () => updatePromise);
     }
+  },
+
+  editNodeAndBranch: (nodeId, newContent, shouldBranch) => {
+    const { nodes } = get();
+
+    // Find the node to edit
+    const targetNode = nodes.find((n) => n.id === nodeId);
+    if (!targetNode) {
+      console.error('Node not found');
+      return null;
+    }
+
+    if (!shouldBranch) {
+      // No descendants - just update in place
+      get().updateNodeContent(nodeId, newContent);
+      return nodeId;
+    }
+
+    // Has descendants - create a new branch
+    // Get the parent of the edited node
+    const parentId = targetNode.parentIds.length > 0 ? targetNode.parentIds[0] : null;
+
+    // Create a new user node as a sibling (child of same parent)
+    const newNodeId = generateId();
+    const newNode: ConversationNode = {
+      id: newNodeId,
+      parentIds: parentId ? [parentId] : [],
+      role: 'user',
+      content: newContent,
+      createdAt: Date.now(),
+      treeId: 'main',
+      estimatedTokens: estimateTokens(newContent),
+      isVariation: true,
+      originalNodeId: nodeId,
+    };
+
+    const { chats, activeChatId, chatName } = get();
+    const newNodes = [...nodes, newNode];
+    const path = getPathToNodeHelper(newNodeId, newNodes);
+
+    const updatedChats = chats.map((chat) =>
+      chat.id === activeChatId
+        ? { ...chat, nodes: newNodes, activeNodeId: newNodeId, name: chatName }
+        : chat
+    );
+
+    set({
+      chats: updatedChats,
+      nodes: newNodes,
+      activeNodeId: newNodeId,
+      selectedNodeId: newNodeId,
+      selectedNodeIds: [],
+      messages: buildMessagesFromPath(path),
+      error: null,
+    });
+
+    // Sync to API in background
+    const nodeSyncPromise = (async () => {
+      nodeSyncStatus.set(newNodeId, NodeSyncStatus.SYNCING);
+
+      const serverChatId = await ensureChatSynced(activeChatId!, chatName);
+
+      if (serverChatId !== activeChatId) {
+        set((state) => ({
+          chats: state.chats.map((c) =>
+            c.id === activeChatId ? { ...c, id: serverChatId } : c
+          ),
+          activeChatId: state.activeChatId === activeChatId ? serverChatId : state.activeChatId,
+        }));
+      }
+
+      // Wait for parent node to be synced first
+      await waitForNodeSync(parentId);
+
+      await api.createNode(serverChatId, {
+        id: newNodeId,
+        role: 'user',
+        content: newContent,
+        parentIds: parentId ? [parentId] : [],
+        isVariation: true,
+        originalNodeId: nodeId,
+      });
+      await api.updateChat(serverChatId, { activeNodeId: newNodeId });
+
+      syncedNodes.add(newNodeId);
+      nodeSyncStatus.set(newNodeId, NodeSyncStatus.SYNCED);
+      pendingNodeSyncs.delete(newNodeId);
+    })();
+
+    pendingNodeSyncs.set(newNodeId, nodeSyncPromise);
+    syncInBackground(newNodeId, 'node', () => nodeSyncPromise);
+
+    return newNodeId;
   },
 
   deleteNode: async (nodeId) => {

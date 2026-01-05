@@ -8,6 +8,9 @@ A visual conversation tree interface for interacting with Large Language Models.
 
 - **Visual Conversation Tree**: See your entire conversation history as an interactive directed acyclic graph (DAG)
 - **Branching Conversations**: Create alternative responses by branching from any point in the conversation
+- **Edit and Branch**: Double-click any user message to edit it inline
+  - Updates in place if the node has no descendants
+  - Creates a new variation branch if descendants exist, preserving the original conversation path
 - **Merge Nodes**: Combine multiple conversation branches into a single context for the LLM
 - **Context Management**: Real-time context window tracking with visual indicators and warnings
   - Token usage visualization on nodes and in sidebar
@@ -98,6 +101,15 @@ When search is enabled for a message, results are automatically injected into th
 - Click any node in the conversation tree to navigate to that point
 - Send a new message to create a branch from the selected node
 - Multiple branches can exist from any single node
+
+### Edit and Branch
+- Double-click any user message node (purple nodes) to edit it
+- If the node has no responses below it, the edit updates in place
+- If the node has responses below it:
+  - The "Branch & Regenerate" button creates a new variation branch
+  - The original conversation path remains intact
+  - A new AI response is automatically generated for the edited prompt
+- Press Escape to cancel editing without changes
 
 ### Merging Branches
 1. Hold Shift and click nodes to select multiple conversation endpoints

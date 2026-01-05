@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import { SearchIcon } from '../components/icons';
 
@@ -11,14 +11,20 @@ export interface ConversationNodeData extends Record<string, unknown> {
   childCount: number;
   hasSearchMetadata: boolean;  // Whether web search was used for this response
   contextPercentage?: number;  // Context usage percentage for this path
+  onEdit?: (newContent: string, shouldBranch: boolean) => void;  // Callback for editing
+  isVariation?: boolean;  // Whether this is a variation branch
 }
 
 export type ConversationNodeType = Node<ConversationNodeData, 'conversation'>;
 
 function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNodeType>): JSX.Element {
-  const { role, content, isActive, isOnActivePath, isSelected, childCount, hasSearchMetadata, contextPercentage } = data;
+  const { role, content, isActive, isOnActivePath, isSelected, childCount, hasSearchMetadata, contextPercentage, onEdit } = data;
   const isUser = role === 'user';
   const hasChildren = childCount > 0;
+
+  // Edit mode state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedContent, setEditedContent] = useState(content);
 
   // Show context indicator when above 60% threshold
   const showContextIndicator = contextPercentage !== undefined && contextPercentage >= 0.6;
@@ -28,6 +34,33 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
   const displayContent = content.length > 60
     ? content.substring(0, 60) + '...'
     : content;
+
+  // Edit handlers
+  const handleDoubleClick = () => {
+    if (isUser && onEdit) {
+      setIsEditing(true);
+      setEditedContent(content);
+    }
+  };
+
+  const handleSave = () => {
+    if (editedContent.trim() && onEdit) {
+      const shouldBranch = hasChildren;
+      onEdit(editedContent.trim(), shouldBranch);
+      setIsEditing(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setIsEditing(false);
+    setEditedContent(content);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      handleCancel();
+    }
+  };
 
   return (
     <>
@@ -40,7 +73,7 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
 
       <div
         className={`
-          relative px-3 py-2 rounded-lg w-[180px] text-sm
+          relative px-3 py-2 rounded-lg ${isEditing ? 'w-[280px]' : 'w-[180px]'} text-sm
           transition-all duration-150 cursor-pointer
           ${isUser
             ? 'bg-[var(--color-accent)] text-white'
@@ -61,16 +94,45 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
             : 'shadow-sm hover:shadow-md'
           }
         `}
+        onDoubleClick={handleDoubleClick}
       >
         {/* Role indicator */}
         <div className={`text-xs font-medium mb-1 ${isUser ? 'text-white/70' : 'text-[var(--color-text-secondary)]'}`}>
           {isUser ? 'You' : 'Assistant'}
         </div>
 
-        {/* Content preview */}
-        <div className="break-words leading-snug line-clamp-3">
-          {displayContent}
-        </div>
+        {isEditing ? (
+          /* Edit mode */
+          <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+            <textarea
+              value={editedContent}
+              onChange={(e) => setEditedContent(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="w-full h-24 px-2 py-1 text-xs bg-white/10 border border-white/20 rounded resize-none focus:outline-none focus:ring-1 focus:ring-white/40"
+              autoFocus
+              placeholder="Edit your message..."
+            />
+            <div className="flex gap-1.5 justify-end">
+              <button
+                onClick={handleCancel}
+                className="px-2 py-1 text-[10px] bg-white/10 hover:bg-white/20 rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-2 py-1 text-[10px] bg-white/90 text-[var(--color-accent)] hover:bg-white rounded transition-colors font-medium"
+              >
+                {hasChildren ? 'Branch & Regenerate' : 'Update'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Normal display */
+          <div className="break-words leading-snug line-clamp-3">
+            {displayContent}
+          </div>
+        )}
 
         {/* Search indicator badge */}
         {hasSearchMetadata && (

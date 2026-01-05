@@ -68,6 +68,8 @@ export interface ConversationNode {
   summarizedNodeIds?: string[];        // Original nodes this summary replaces
   excludeFromContext?: boolean;        // Skip when building LLM context
   estimatedTokens?: number;            // Cached token count
+  isVariation?: boolean;               // Flag for variation branches (edited and branched)
+  originalNodeId?: string;             // Reference to the original node this is a variation of
 }
 
 // Streaming Types

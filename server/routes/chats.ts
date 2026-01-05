@@ -22,6 +22,8 @@ interface ConversationNode {
   searchMetadata?: SearchMetadata;
   isSummary?: boolean;
   summarizedNodeIds?: string[];
+  isVariation?: boolean;
+  originalNodeId?: string;
 }
 
 interface DbChatRow {
@@ -42,6 +44,8 @@ interface DbNodeRow {
   searchMetadata: string | null;
   isSummary: number;
   summarizedNodeIds: string | null;
+  isVariation: number;
+  originalNodeId: string | null;
 }
 
 // Helper to generate IDs
@@ -86,7 +90,8 @@ router.get('/:id', (req: Request, res: Response) => {
     const nodes = db.prepare(`
       SELECT id, role, content, tree_id as treeId, created_at as createdAt,
              search_metadata as searchMetadata, is_summary as isSummary,
-             summarized_node_ids as summarizedNodeIds
+             summarized_node_ids as summarizedNodeIds, is_variation as isVariation,
+             original_node_id as originalNodeId
       FROM conversation_nodes WHERE chat_id = ?
       ORDER BY created_at
     `).all(req.params.id) as DbNodeRow[];
@@ -134,6 +139,8 @@ router.get('/:id', (req: Request, res: Response) => {
       searchMetadata: n.searchMetadata ? JSON.parse(n.searchMetadata) : undefined,
       isSummary: n.isSummary === 1,
       summarizedNodeIds: n.summarizedNodeIds ? JSON.parse(n.summarizedNodeIds) : undefined,
+      isVariation: n.isVariation === 1,
+      originalNodeId: n.originalNodeId || undefined,
     }));
 
     res.json({
@@ -250,7 +257,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 // POST /api/chats/:chatId/nodes - Add node to chat
 router.post('/:chatId/nodes', (req: Request, res: Response) => {
   try {
-    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main', searchMetadata, isSummary, summarizedNodeIds } = req.body;
+    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main', searchMetadata, isSummary, summarizedNodeIds, isVariation, originalNodeId } = req.body;
     const chatId = req.params.chatId;
     // Use provided ID if given (allows frontend to maintain ID consistency)
     const id = providedId || generateId();
@@ -265,8 +272,8 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
     const insertNode = db.transaction(() => {
       // Insert node
       db.prepare(`
-        INSERT INTO conversation_nodes (id, chat_id, role, content, tree_id, created_at, search_metadata, is_summary, summarized_node_ids)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO conversation_nodes (id, chat_id, role, content, tree_id, created_at, search_metadata, is_summary, summarized_node_ids, is_variation, original_node_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         chatId,
@@ -276,7 +283,9 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
         now,
         searchMetadata ? JSON.stringify(searchMetadata) : null,
         isSummary ? 1 : 0,
-        summarizedNodeIds ? JSON.stringify(summarizedNodeIds) : null
+        summarizedNodeIds ? JSON.stringify(summarizedNodeIds) : null,
+        isVariation ? 1 : 0,
+        originalNodeId || null
       );
 
       // Insert parent relationships
@@ -314,6 +323,8 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
       searchMetadata,
       isSummary,
       summarizedNodeIds,
+      isVariation,
+      originalNodeId,
     };
 
     res.status(201).json(node);

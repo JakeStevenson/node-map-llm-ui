@@ -20,7 +20,7 @@ import { useConversationStore } from '../../store/conversationStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { getLayoutedElements } from '../../utils/layoutUtils';
 import { calculatePathContext } from '../../services/contextService';
-import { generatePathSummary } from '../../services/llmService';
+import { generatePathSummary, sendMessageWithSearch } from '../../services/llmService';
 
 function CanvasViewInner(): JSX.Element {
   const { setCenter, getZoom } = useReactFlow();
@@ -38,6 +38,8 @@ function CanvasViewInner(): JSX.Element {
     childCount: number;
   } | null>(null);
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const {
     nodes: conversationNodes,
     activeNodeId,
@@ -49,10 +51,17 @@ function CanvasViewInner(): JSX.Element {
     getPathToNode,
     createSummaryNode,
     deleteNode,
+    editNodeAndBranch,
+    getMessagesForLLM,
+    setIsStreaming,
+    appendStreamingContent,
+    finalizeStreamingWithSearch,
+    setError,
   } = useConversationStore();
 
   const { getContextConfig, getConfig } = useSettingsStore();
   const contextConfig = getContextConfig();
+  const llmConfig = getConfig();
 
   // Sync React Flow's selection with our store (for Ctrl+click / box select)
   useOnSelectionChange({
@@ -103,6 +112,39 @@ function CanvasViewInner(): JSX.Element {
     });
     return contextMap;
   }, [conversationNodes, contextConfig, getPathToNode]);
+
+  // Handle edit node (defined here before useMemo that uses it)
+  const handleEditNode = useCallback(async (nodeId: string, newContent: string, shouldBranch: boolean) => {
+    try {
+      const newNodeId = editNodeAndBranch(nodeId, newContent, shouldBranch);
+
+      // If branching (new node created), trigger LLM to generate response
+      if (shouldBranch && newNodeId && newNodeId !== nodeId) {
+        setIsStreaming(true);
+        abortControllerRef.current = new AbortController();
+
+        // Get full context for LLM
+        const allMessages = getMessagesForLLM();
+
+        await sendMessageWithSearch({
+          config: llmConfig,
+          messages: allMessages,
+          webSearchConfig: null,  // No search for variations (can be added later)
+          onChunk: (chunk) => appendStreamingContent(chunk),
+          onSearchStart: () => {},
+          onSearchComplete: () => {},
+          onDone: () => {
+            finalizeStreamingWithSearch();
+          },
+          onError: (err) => setError(err.message),
+          abortSignal: abortControllerRef.current.signal,
+        });
+      }
+    } catch (error) {
+      console.error('Error editing node:', error);
+      setErrorMessage('Failed to edit node. Please try again.');
+    }
+  }, [editNodeAndBranch, llmConfig, getMessagesForLLM, setIsStreaming, appendStreamingContent, finalizeStreamingWithSearch, setError]);
 
   // Convert conversation nodes to React Flow nodes
   const { nodes, edges } = useMemo(() => {
@@ -178,6 +220,8 @@ function CanvasViewInner(): JSX.Element {
           childCount: childCounts.get(node.id) || 0,
           hasSearchMetadata: !!node.searchMetadata,
           contextPercentage,
+          isVariation: node.isVariation || false,
+          onEdit: (newContent: string, shouldBranch: boolean) => handleEditNode(node.id, newContent, shouldBranch),
         } as ConversationNodeData,
       };
     });
@@ -207,7 +251,7 @@ function CanvasViewInner(): JSX.Element {
 
     // Apply Dagre layout
     return getLayoutedElements(flowNodes, flowEdges);
-  }, [conversationNodes, activeNodeId, activePathIds, selectedNodeIds, nodeContextMap]);
+  }, [conversationNodes, activeNodeId, activePathIds, selectedNodeIds, nodeContextMap, handleEditNode]);
 
   // Auto-pan only when NEW nodes are added (not when navigating to existing nodes)
   // Preserves current zoom level

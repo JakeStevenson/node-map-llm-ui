@@ -31,6 +31,8 @@ export interface CreateNodeRequest {
   searchMetadata?: SearchMetadata;
   isSummary?: boolean;
   summarizedNodeIds?: string[];
+  isVariation?: boolean;
+  originalNodeId?: string;
 }
 
 // Fetch all chats (lightweight list without nodes)

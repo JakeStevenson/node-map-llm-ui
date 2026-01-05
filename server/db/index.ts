@@ -106,10 +106,24 @@ try {
   // Column already exists, ignore error
 }
 
+// Migration: Add variation tracking columns if they don't exist
+try {
+  db.exec('ALTER TABLE conversation_nodes ADD COLUMN is_variation INTEGER DEFAULT 0');
+} catch {
+  // Column already exists, ignore error
+}
+
+try {
+  db.exec('ALTER TABLE conversation_nodes ADD COLUMN original_node_id TEXT');
+} catch {
+  // Column already exists, ignore error
+}
+
 // Create indexes for context management queries
 try {
   db.exec('CREATE INDEX IF NOT EXISTS idx_nodes_exclude_context ON conversation_nodes(exclude_from_context)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_nodes_is_summary ON conversation_nodes(is_summary)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_nodes_is_variation ON conversation_nodes(is_variation)');
 } catch {
   // Indexes already exist, ignore error
 }
