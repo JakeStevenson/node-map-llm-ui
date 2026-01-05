@@ -82,6 +82,7 @@ router.post('/upload/:chatId', upload.single('file'), async (req: Request, res: 
 
     const chatId = req.params.chatId;
     const nodeId = req.body.nodeId || null; // Optional node association
+    const embeddingConfig = req.body.embeddingConfig ? JSON.parse(req.body.embeddingConfig) : undefined;
     const documentId = req.body.documentId;
     const now = Date.now();
 
@@ -127,7 +128,7 @@ router.post('/upload/:chatId', upload.single('file'), async (req: Request, res: 
     };
 
     // Trigger background processing (fire and forget)
-    processDocument(documentId).catch((err) => {
+    processDocument(documentId, embeddingConfig).catch((err) => {
       console.error(`Background processing failed for ${documentId}:`, err);
     });
 
@@ -213,6 +214,7 @@ router.delete('/:documentId', (req: Request, res: Response) => {
 router.post('/:documentId/process', async (req: Request, res: Response) => {
   try {
     const documentId = req.params.documentId;
+    const embeddingConfig = req.body.embeddingConfig;
 
     // Verify document exists
     const doc = db.prepare('SELECT id FROM documents WHERE id = ?').get(documentId);
@@ -221,7 +223,7 @@ router.post('/:documentId/process', async (req: Request, res: Response) => {
     }
 
     // Trigger processing
-    await processDocument(documentId);
+    await processDocument(documentId, embeddingConfig);
 
     res.json({ success: true, message: 'Document processed successfully' });
   } catch (error) {
@@ -236,7 +238,7 @@ router.post('/:documentId/process', async (req: Request, res: Response) => {
 // POST /api/documents/search - Search for relevant chunks
 router.post('/search', async (req: Request, res: Response) => {
   try {
-    const { chatId, query, topK, maxTokens, minScore } = req.body;
+    const { chatId, query, topK, maxTokens, minScore, embeddingConfig } = req.body;
 
     if (!chatId || !query) {
       return res.status(400).json({ error: 'chatId and query are required' });
@@ -248,7 +250,7 @@ router.post('/search', async (req: Request, res: Response) => {
     if (maxTokens !== undefined) searchOptions.maxTokens = maxTokens;
     if (minScore !== undefined) searchOptions.minScore = minScore;
 
-    const results = await searchRelevantChunks(chatId, query, searchOptions);
+    const results = await searchRelevantChunks(chatId, query, searchOptions, embeddingConfig);
 
     res.json({ results, count: results.length });
   } catch (error) {

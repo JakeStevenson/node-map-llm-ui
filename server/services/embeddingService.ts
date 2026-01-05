@@ -1,41 +1,46 @@
+export interface EmbeddingConfig {
+  endpoint: string;
+  apiKey?: string;
+  model: string;
+}
+
 /**
  * Embedding service using OpenAI-compatible API (Ollama, Groq, etc.)
  * Generates embeddings via API calls to configured endpoint
  */
 class EmbeddingService {
-  private endpoint: string;
-  private apiKey: string | undefined;
-  private modelName: string;
   private dimensions: number | null = null;
 
-  constructor() {
-    // Get configuration from environment
-    this.endpoint = process.env.EMBEDDING_ENDPOINT || process.env.OPENAI_ENDPOINT || 'http://localhost:11434/v1';
-    this.apiKey = process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY;
-    this.modelName = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
-
-    console.log(`Embedding service configured: ${this.endpoint} using model ${this.modelName}`);
+  // Default config from environment variables (fallback)
+  private getDefaultConfig(): EmbeddingConfig {
+    return {
+      endpoint: process.env.EMBEDDING_ENDPOINT || process.env.OPENAI_ENDPOINT || 'http://localhost:11434/v1',
+      apiKey: process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY,
+      model: process.env.EMBEDDING_MODEL || 'nomic-embed-text',
+    };
   }
 
   /**
    * Generate embedding for a single text
    */
-  async generateEmbedding(text: string): Promise<Float32Array> {
+  async generateEmbedding(text: string, config?: EmbeddingConfig): Promise<Float32Array> {
+    const cfg = config || this.getDefaultConfig();
+
     // Normalize text
     const normalizedText = text.trim();
 
-    const url = `${this.endpoint.replace(/\/$/, '')}/embeddings`;
+    const url = `${cfg.endpoint.replace(/\/$/, '')}/embeddings`;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
 
-    if (this.apiKey) {
-      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    if (cfg.apiKey) {
+      headers['Authorization'] = `Bearer ${cfg.apiKey}`;
     }
 
     const body = JSON.stringify({
-      model: this.modelName,
+      model: cfg.model,
       input: normalizedText,
     });
 
@@ -78,7 +83,7 @@ class EmbeddingService {
    * Generate embeddings for multiple texts in batch
    * OpenAI API supports batching, but we'll process sequentially for compatibility
    */
-  async generateBatch(texts: string[]): Promise<Float32Array[]> {
+  async generateBatch(texts: string[], config?: EmbeddingConfig): Promise<Float32Array[]> {
     const embeddings: Float32Array[] = [];
 
     // Process in batches to avoid overwhelming the API
@@ -88,7 +93,7 @@ class EmbeddingService {
 
       // Process batch in parallel
       const batchEmbeddings = await Promise.all(
-        batch.map((text) => this.generateEmbedding(text))
+        batch.map((text) => this.generateEmbedding(text, config))
       );
 
       embeddings.push(...batchEmbeddings);

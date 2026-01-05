@@ -13,6 +13,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     endpoint,
     apiKey,
     model,
+    embeddingEndpoint,
+    embeddingApiKey,
+    embeddingModel,
     defaultSystemPrompt,
     availableModels,
     isLoadingModels,
@@ -22,6 +25,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     isLoadingServerSearch,
     setModel,
     updateConfig,
+    updateEmbeddingConfig,
     setAvailableModels,
     setIsLoadingModels,
     setModelsError,
@@ -32,6 +36,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
 
   const [localEndpoint, setLocalEndpoint] = useState(endpoint);
   const [localApiKey, setLocalApiKey] = useState(apiKey);
+  const [localEmbeddingEndpoint, setLocalEmbeddingEndpoint] = useState(embeddingEndpoint);
+  const [localEmbeddingApiKey, setLocalEmbeddingApiKey] = useState(embeddingApiKey);
+  const [localEmbeddingModel, setLocalEmbeddingModel] = useState(embeddingModel);
   const [localDefaultPrompt, setLocalDefaultPrompt] = useState(defaultSystemPrompt);
 
   // Web search local state
@@ -52,12 +59,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     if (isOpen) {
       setLocalEndpoint(endpoint);
       setLocalApiKey(apiKey);
+      setLocalEmbeddingEndpoint(embeddingEndpoint);
+      setLocalEmbeddingApiKey(embeddingApiKey);
+      setLocalEmbeddingModel(embeddingModel);
       setLocalDefaultPrompt(defaultSystemPrompt);
       setLocalSearchEnabled(webSearch.enabled);
       setLocalSearchMaxResults(webSearch.maxResults);
       setSearchTestResult(null);
     }
-  }, [isOpen, endpoint, apiKey, defaultSystemPrompt, webSearch]);
+  }, [isOpen, endpoint, apiKey, embeddingEndpoint, embeddingApiKey, embeddingModel, defaultSystemPrompt, webSearch]);
 
   // Fetch models when endpoint/key changes
   const handleFetchModels = useCallback(async () => {
@@ -102,6 +112,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     updateConfig({
       endpoint: localEndpoint,
       apiKey: localApiKey,
+    });
+    updateEmbeddingConfig({
+      embeddingEndpoint: localEmbeddingEndpoint,
+      embeddingApiKey: localEmbeddingApiKey,
+      embeddingModel: localEmbeddingModel,
     });
     setDefaultSystemPrompt(localDefaultPrompt);
     updateWebSearchConfig({
@@ -257,6 +272,76 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
             <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
               This will be used for new chats. Can be overridden per conversation.
             </p>
+          </div>
+
+          {/* Embedding Settings Section */}
+          <div className="pt-4 border-t border-[var(--color-border)]">
+            <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-3">
+              Embedding Settings (Document Search)
+            </h3>
+
+            {/* Embedding Endpoint */}
+            <div className="mb-3">
+              <label
+                htmlFor="embeddingEndpoint"
+                className="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+              >
+                Embedding API Endpoint
+              </label>
+              <input
+                id="embeddingEndpoint"
+                type="url"
+                value={localEmbeddingEndpoint}
+                onChange={(e) => setLocalEmbeddingEndpoint(e.target.value)}
+                placeholder="http://localhost:11434/v1"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent"
+              />
+              <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                OpenAI-compatible embedding endpoint (e.g., Ollama, Groq)
+              </p>
+            </div>
+
+            {/* Embedding API Key */}
+            <div className="mb-3">
+              <label
+                htmlFor="embeddingApiKey"
+                className="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+              >
+                Embedding API Key
+              </label>
+              <input
+                id="embeddingApiKey"
+                type="password"
+                value={localEmbeddingApiKey}
+                onChange={(e) => setLocalEmbeddingApiKey(e.target.value)}
+                placeholder="Optional for Ollama"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent"
+              />
+              <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                Optional for providers that don't require authentication
+              </p>
+            </div>
+
+            {/* Embedding Model */}
+            <div>
+              <label
+                htmlFor="embeddingModel"
+                className="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+              >
+                Embedding Model
+              </label>
+              <input
+                id="embeddingModel"
+                type="text"
+                value={localEmbeddingModel}
+                onChange={(e) => setLocalEmbeddingModel(e.target.value)}
+                placeholder="nomic-embed-text"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent"
+              />
+              <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                Model name for generating embeddings (e.g., nomic-embed-text, text-embedding-3-small)
+              </p>
+            </div>
           </div>
 
           {/* Web Search Section */}

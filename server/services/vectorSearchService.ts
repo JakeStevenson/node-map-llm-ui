@@ -1,5 +1,5 @@
 import db from '../db/index.js';
-import embeddingService from './embeddingService.js';
+import embeddingService, { type EmbeddingConfig } from './embeddingService.js';
 
 export interface SearchResult {
   chunkId: string;
@@ -50,14 +50,15 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 export async function searchRelevantChunks(
   chatId: string,
   query: string,
-  options: SearchOptions = {}
+  options: SearchOptions = {},
+  embeddingConfig?: EmbeddingConfig
 ): Promise<SearchResult[]> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
   console.log(`Searching for: "${query}" (chatId: ${chatId})`);
 
   // Generate query embedding
-  const queryEmbedding = await embeddingService.generateEmbedding(query);
+  const queryEmbedding = await embeddingService.generateEmbedding(query, embeddingConfig);
 
   // Get all document IDs for this chat (conversation-level only for now)
   const documentIds = db.prepare(`

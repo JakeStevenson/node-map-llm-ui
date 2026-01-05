@@ -5,10 +5,15 @@ import { getModelConfig } from '../services/contextService';
 import { getModelContextWindow } from '../services/modelInfoService';
 
 interface SettingsState {
-  // Config
+  // LLM Config
   endpoint: string;
   apiKey: string;
   model: string;
+
+  // Embedding Config
+  embeddingEndpoint: string;
+  embeddingApiKey: string;
+  embeddingModel: string;
 
   // Default System Prompt
   defaultSystemPrompt: string;
@@ -28,7 +33,7 @@ interface SettingsState {
   isLoadingModels: boolean;
   modelsError: string | null;
 
-  // Actions
+  // LLM Actions
   setEndpoint: (endpoint: string) => void;
   setApiKey: (apiKey: string) => void;
   setModel: (model: string) => Promise<void>;
@@ -37,6 +42,13 @@ interface SettingsState {
   setIsLoadingModels: (loading: boolean) => void;
   setModelsError: (error: string | null) => void;
   getConfig: () => LLMConfig;
+
+  // Embedding Actions
+  setEmbeddingEndpoint: (endpoint: string) => void;
+  setEmbeddingApiKey: (apiKey: string) => void;
+  setEmbeddingModel: (model: string) => void;
+  updateEmbeddingConfig: (config: Partial<Pick<SettingsState, 'embeddingEndpoint' | 'embeddingApiKey' | 'embeddingModel'>>) => void;
+  getEmbeddingConfig: () => { endpoint: string; apiKey: string; model: string };
 
   // Default System Prompt Actions
   setDefaultSystemPrompt: (prompt: string) => void;
@@ -61,6 +73,8 @@ interface SettingsState {
 }
 
 const DEFAULT_ENDPOINT = '';
+const DEFAULT_EMBEDDING_ENDPOINT = 'http://localhost:11434/v1';
+const DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text';
 
 const DEFAULT_WEB_SEARCH: WebSearchConfig = {
   enabled: false,
@@ -82,6 +96,9 @@ export const useSettingsStore = create<SettingsState>()(
       endpoint: DEFAULT_ENDPOINT,
       apiKey: '',
       model: '',
+      embeddingEndpoint: DEFAULT_EMBEDDING_ENDPOINT,
+      embeddingApiKey: '',
+      embeddingModel: DEFAULT_EMBEDDING_MODEL,
       defaultSystemPrompt: '',
       webSearch: DEFAULT_WEB_SEARCH,
       contextConfig: DEFAULT_CONTEXT_CONFIG,
@@ -131,6 +148,17 @@ export const useSettingsStore = create<SettingsState>()(
         endpoint: get().endpoint,
         apiKey: get().apiKey,
         model: get().model,
+      }),
+
+      // Embedding Actions
+      setEmbeddingEndpoint: (endpoint) => set({ embeddingEndpoint: endpoint }),
+      setEmbeddingApiKey: (apiKey) => set({ embeddingApiKey: apiKey }),
+      setEmbeddingModel: (model) => set({ embeddingModel: model }),
+      updateEmbeddingConfig: (config) => set(config),
+      getEmbeddingConfig: () => ({
+        endpoint: get().embeddingEndpoint,
+        apiKey: get().embeddingApiKey,
+        model: get().embeddingModel,
       }),
 
       // Default System Prompt Actions
@@ -204,6 +232,9 @@ export const useSettingsStore = create<SettingsState>()(
         endpoint: state.endpoint,
         apiKey: state.apiKey,
         model: state.model,
+        embeddingEndpoint: state.embeddingEndpoint,
+        embeddingApiKey: state.embeddingApiKey,
+        embeddingModel: state.embeddingModel,
         defaultSystemPrompt: state.defaultSystemPrompt,
         webSearch: state.webSearch,
         contextConfig: state.contextConfig,

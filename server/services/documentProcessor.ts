@@ -2,12 +2,12 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../db/index.js';
 import { extractContent } from './extractors/index.js';
 import { chunkText } from './chunkingService.js';
-import embeddingService from './embeddingService.js';
+import embeddingService, { type EmbeddingConfig } from './embeddingService.js';
 
 /**
  * Process a document: extract text, chunk it, and store chunks
  */
-export async function processDocument(documentId: string): Promise<void> {
+export async function processDocument(documentId: string, embeddingConfig?: EmbeddingConfig): Promise<void> {
   try {
     // Get document metadata
     const doc = db.prepare(`
@@ -49,7 +49,7 @@ export async function processDocument(documentId: string): Promise<void> {
     // Generate embeddings for all chunks
     console.log(`Generating embeddings for ${chunks.length} chunks...`);
     const chunkTexts = chunks.map((c) => c.content);
-    const embeddings = await embeddingService.generateBatch(chunkTexts);
+    const embeddings = await embeddingService.generateBatch(chunkTexts, embeddingConfig);
 
     console.log(`Generated ${embeddings.length} embeddings`);
 

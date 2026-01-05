@@ -1438,11 +1438,17 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       throw new Error('No active chat');
     }
 
+    // Get embedding config from settings store
+    const { useSettingsStore: settingsStore } = await import('./settingsStore.js');
+    const embeddingConfig = settingsStore.getState().getEmbeddingConfig();
+
     const formData = new FormData();
     formData.append('file', file);
     if (nodeId) {
       formData.append('nodeId', nodeId);
     }
+    // Pass embedding config as JSON string
+    formData.append('embeddingConfig', JSON.stringify(embeddingConfig));
 
     const response = await fetch(`/api/documents/upload/${activeChatId}`, {
       method: 'POST',
