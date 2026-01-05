@@ -16,6 +16,7 @@ export interface ChatDetail {
   name: string;
   activeNodeId: string | null;
   systemPrompt?: string;
+  customSummaryPrompt?: string;
   createdAt: number;
   updatedAt: number;
   nodes: ConversationNode[];
@@ -70,10 +71,10 @@ export async function createChat(name?: string, systemPrompt?: string): Promise<
   return res.json();
 }
 
-// Update a chat (name, activeNodeId, and/or systemPrompt)
+// Update a chat (name, activeNodeId, systemPrompt, and/or customSummaryPrompt)
 export async function updateChat(
   id: string,
-  data: { name?: string; activeNodeId?: string | null; systemPrompt?: string }
+  data: { name?: string; activeNodeId?: string | null; systemPrompt?: string; customSummaryPrompt?: string }
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/chats/${id}`, {
     method: 'PUT',

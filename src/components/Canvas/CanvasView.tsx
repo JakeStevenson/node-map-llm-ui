@@ -20,7 +20,9 @@ import { useConversationStore } from '../../store/conversationStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { getLayoutedElements } from '../../utils/layoutUtils';
 import { calculatePathContext } from '../../services/contextService';
-import { generatePathSummary, sendMessageWithSearch } from '../../services/llmService';
+import { generatePathSummaryWithGuidance, sendMessageWithSearch } from '../../services/llmService';
+import { SummarizePromptDialog } from '../Summarization/SummarizePromptDialog';
+import { SummaryReviewDialog } from '../Summarization/SummaryReviewDialog';
 
 function CanvasViewInner(): JSX.Element {
   const { setCenter, getZoom } = useReactFlow();
@@ -30,13 +32,18 @@ function CanvasViewInner(): JSX.Element {
     x: number;
     y: number;
   } | null>(null);
-  const [isSummarizing, setIsSummarizing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     nodeId: string;
     hasChildren: boolean;
     childCount: number;
   } | null>(null);
+  const [summarizationState, setSummarizationState] = useState<{
+    stage: 'idle' | 'prompt' | 'generating' | 'review';
+    nodeId?: string;
+    customPrompt?: string;
+    generatedSummary?: string;
+  }>({ stage: 'idle' });
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -44,6 +51,7 @@ function CanvasViewInner(): JSX.Element {
     nodes: conversationNodes,
     activeNodeId,
     selectedNodeIds,
+    customSummaryPrompt,
     selectNode,
     toggleNodeSelection,
     clearNodeSelection,
@@ -57,6 +65,7 @@ function CanvasViewInner(): JSX.Element {
     appendStreamingContent,
     finalizeStreamingWithSearch,
     setError,
+    setCustomSummaryPrompt,
   } = useConversationStore();
 
   const { getContextConfig, getConfig } = useSettingsStore();
@@ -313,19 +322,32 @@ function CanvasViewInner(): JSX.Element {
     });
   }, [conversationNodes]);
 
-  // Handle summarize action
-  const handleSummarize = useCallback(async () => {
-    if (!contextMenu || isSummarizing) return;
-
-    const nodeId = contextMenu.nodeId;
+  // Multi-stage summarization flow
+  // Stage 1: User right-clicks → Open prompt dialog
+  const handleSummarizeStart = useCallback((nodeId: string) => {
+    const savedPrompt = customSummaryPrompt || '';
+    setSummarizationState({
+      stage: 'prompt',
+      nodeId,
+      customPrompt: savedPrompt,
+    });
     setContextMenu(null);
-    setIsSummarizing(true);
+  }, [customSummaryPrompt]);
+
+  // Stage 2: User submits custom prompt → Generate summary
+  const handleGenerateSummary = useCallback(async (customPrompt: string) => {
+    if (!summarizationState.nodeId) return;
+
+    setSummarizationState(prev => ({ ...prev, stage: 'generating', customPrompt }));
     setErrorMessage(null);
 
+    // Save prompt for future use
+    setCustomSummaryPrompt(customPrompt);
+
     try {
+      const nodeId = summarizationState.nodeId;
       // Get the path to summarize
       const path = conversationNodes.filter((n) => {
-        // Build path by following parents from nodeId to root
         const pathToNode = getPathToNode(nodeId);
         return pathToNode.some((p) => p.id === n.id);
       });
@@ -340,26 +362,54 @@ function CanvasViewInner(): JSX.Element {
           createdAt: n.createdAt,
         }));
 
-      // Generate summary via LLM
-      const llmConfig = getConfig();
-      const summary = await generatePathSummary(llmConfig, messages);
+      // Generate summary with user guidance
+      const summary = await generatePathSummaryWithGuidance(
+        llmConfig,
+        messages,
+        customPrompt.trim() || undefined
+      );
 
       // Check if we got a placeholder fallback (indicates LLM failed)
       if (summary.startsWith('Summary of ') && summary.includes('messages (')) {
-        setErrorMessage('Failed to generate AI summary. Check your LLM settings and try again. A placeholder summary was created instead.');
+        setErrorMessage('Failed to generate AI summary. Check your LLM settings and try again.');
+        setSummarizationState({ stage: 'idle' });
+        return;
       }
 
-      // Create summary node with generated content
-      await createSummaryNode(nodeId, summary);
+      // Move to review stage
+      setSummarizationState(prev => ({
+        ...prev,
+        stage: 'review',
+        generatedSummary: summary,
+      }));
     } catch (error) {
       console.error('Failed to generate summary:', error);
       setErrorMessage(`Summarization failed: ${error instanceof Error ? error.message : 'Unknown error'}. Check your LLM configuration.`);
-      // Fall back to placeholder summary
-      await createSummaryNode(nodeId);
-    } finally {
-      setIsSummarizing(false);
+      setSummarizationState({ stage: 'idle' });
     }
-  }, [contextMenu, isSummarizing, conversationNodes, getPathToNode, getConfig, createSummaryNode]);
+  }, [summarizationState.nodeId, conversationNodes, getPathToNode, llmConfig, setCustomSummaryPrompt]);
+
+  // Stage 3a: User clicks "Re-try" → Back to prompt dialog
+  const handleRetry = useCallback(() => {
+    setSummarizationState(prev => ({
+      ...prev,
+      stage: 'prompt',
+      generatedSummary: undefined,
+    }));
+  }, []);
+
+  // Stage 3b: User clicks "Save" → Create summary node
+  const handleSaveSummary = useCallback(async (editedSummary: string) => {
+    if (!summarizationState.nodeId) return;
+
+    try {
+      await createSummaryNode(summarizationState.nodeId, editedSummary);
+      setSummarizationState({ stage: 'idle' });
+    } catch (error) {
+      console.error('Failed to save summary:', error);
+      setErrorMessage(`Failed to save summary: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [summarizationState.nodeId, createSummaryNode]);
 
   // Handle delete action
   const handleDelete = useCallback((nodeId: string) => {
@@ -465,9 +515,8 @@ function CanvasViewInner(): JSX.Element {
           >
             {!isSummary && (
               <button
-                onClick={handleSummarize}
-                disabled={isSummarizing}
-                className="w-full px-4 py-2 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-hover)] transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => handleSummarizeStart(contextMenu.nodeId)}
+                className="w-full px-4 py-2 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-hover)] transition-colors flex items-center gap-2"
               >
                 <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -487,16 +536,6 @@ function CanvasViewInner(): JSX.Element {
           </div>
         );
       })()}
-
-      {/* Summarizing indicator */}
-      {isSummarizing && (
-        <div className="fixed bottom-4 right-4 z-50 bg-purple-500/90 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
-          <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Generating summary...
-        </div>
-      )}
 
       {/* Error notification */}
       {errorMessage && (
@@ -551,6 +590,37 @@ function CanvasViewInner(): JSX.Element {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Summarization Dialogs */}
+      {summarizationState.stage === 'prompt' && (
+        <SummarizePromptDialog
+          isOpen={true}
+          onClose={() => setSummarizationState({ stage: 'idle' })}
+          onSubmit={handleGenerateSummary}
+          defaultPrompt={summarizationState.customPrompt}
+        />
+      )}
+
+      {summarizationState.stage === 'review' && summarizationState.generatedSummary && (
+        <SummaryReviewDialog
+          isOpen={true}
+          onClose={() => setSummarizationState({ stage: 'idle' })}
+          summary={summarizationState.generatedSummary}
+          onRetry={handleRetry}
+          onSave={handleSaveSummary}
+        />
+      )}
+
+      {/* Generating stage loading indicator */}
+      {summarizationState.stage === 'generating' && (
+        <div className="fixed bottom-4 right-4 z-50 bg-purple-500/90 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
+          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>Generating summary with your guidance...</span>
         </div>
       )}
     </div>

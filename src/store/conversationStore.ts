@@ -9,6 +9,7 @@ interface Chat {
   id: string;
   name: string;
   systemPrompt?: string;
+  customSummaryPrompt?: string;  // User's custom summarization guidance
   nodes: ConversationNode[];
   activeNodeId: string | null;
   createdAt: number;
@@ -31,6 +32,7 @@ interface ConversationState {
   messages: Message[];
   chatName: string;
   chatSystemPrompt: string | undefined;
+  customSummaryPrompt: string | undefined;
 
   // Streaming state
   isStreaming: boolean;
@@ -54,6 +56,7 @@ interface ConversationState {
   deleteChat: (chatId: string) => void;
   renameChat: (name: string) => void;
   updateSystemPrompt: (systemPrompt: string) => void;
+  setCustomSummaryPrompt: (prompt: string) => void;
 
   // Tree Actions
   addNode: (role: 'user' | 'assistant', content: string, parentId: string | null, searchMetadata?: SearchMetadata) => string;
@@ -424,6 +427,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   messages: [],
   chatName: 'Untitled',
   chatSystemPrompt: undefined,
+  customSummaryPrompt: undefined,
   isStreaming: false,
   streamingContent: '',
   streamingParentId: null,
@@ -451,6 +455,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
             id: newChat.id,
             name: newChat.name,
             systemPrompt: newChat.systemPrompt,
+            customSummaryPrompt: newChat.customSummaryPrompt,
             nodes: [],
             activeNodeId: null,
             createdAt: newChat.createdAt,
@@ -462,6 +467,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           messages: [],
           chatName: 'Untitled',
           chatSystemPrompt: newChat.systemPrompt,
+          customSummaryPrompt: newChat.customSummaryPrompt,
           isLoading: false,
           isInitialized: true,
         });
@@ -480,6 +486,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           id: c.id,
           name: c.name,
           systemPrompt: c.id === mostRecentId ? chatDetail.systemPrompt : undefined,
+          customSummaryPrompt: c.id === mostRecentId ? chatDetail.customSummaryPrompt : undefined,
           nodes: c.id === mostRecentId ? chatDetail.nodes : [],
           activeNodeId: c.id === mostRecentId ? chatDetail.activeNodeId : null,
           createdAt: c.createdAt,
@@ -498,6 +505,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           messages: buildMessagesFromPath(path),
           chatName: chatDetail.name,
           chatSystemPrompt: chatDetail.systemPrompt,
+          customSummaryPrompt: chatDetail.customSummaryPrompt,
           isLoading: false,
           isInitialized: true,
         });
@@ -554,7 +562,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
   // Switch to a different chat
   switchChat: async (chatId) => {
-    const { chats, activeChatId, nodes, activeNodeId, chatName, chatSystemPrompt } = get();
+    const { chats, activeChatId, nodes, activeNodeId, chatName, chatSystemPrompt, customSummaryPrompt } = get();
 
     const targetChat = chats.find((c) => c.id === chatId);
     if (!targetChat) return;
@@ -562,7 +570,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     // Save current chat state to chats array
     const updatedChats = chats.map((chat) =>
       chat.id === activeChatId
-        ? { ...chat, nodes, activeNodeId, name: chatName, systemPrompt: chatSystemPrompt }
+        ? { ...chat, nodes, activeNodeId, name: chatName, systemPrompt: chatSystemPrompt, customSummaryPrompt }
         : chat
     );
 
@@ -580,7 +588,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
         const chatsWithLoaded = updatedChats.map((c) =>
           c.id === chatId
-            ? { ...c, nodes: chatDetail.nodes, activeNodeId: chatDetail.activeNodeId, systemPrompt: chatDetail.systemPrompt }
+            ? { ...c, nodes: chatDetail.nodes, activeNodeId: chatDetail.activeNodeId, systemPrompt: chatDetail.systemPrompt, customSummaryPrompt: chatDetail.customSummaryPrompt }
             : c
         );
 
@@ -594,6 +602,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           messages: buildMessagesFromPath(path),
           chatName: chatDetail.name,
           chatSystemPrompt: chatDetail.systemPrompt,
+          customSummaryPrompt: chatDetail.customSummaryPrompt,
           isLoading: false,
           error: null,
         });
@@ -617,6 +626,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         messages: buildMessagesFromPath(path),
         chatName: targetChat.name,
         chatSystemPrompt: targetChat.systemPrompt,
+        customSummaryPrompt: targetChat.customSummaryPrompt,
         error: null,
       });
     }
@@ -699,6 +709,22 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     // Sync to API
     if (activeChatId) {
       syncInBackground(activeChatId, 'chat', () => api.updateChat(activeChatId, { systemPrompt }));
+    }
+  },
+
+  // Set custom summary prompt for current chat
+  setCustomSummaryPrompt: (prompt) => {
+    const { chats, activeChatId } = get();
+
+    const updatedChats = chats.map((chat) =>
+      chat.id === activeChatId ? { ...chat, customSummaryPrompt: prompt } : chat
+    );
+
+    set({ chats: updatedChats, customSummaryPrompt: prompt });
+
+    // Sync to API
+    if (activeChatId) {
+      syncInBackground(activeChatId, 'chat', () => api.updateChat(activeChatId, { customSummaryPrompt: prompt }));
     }
   },
 

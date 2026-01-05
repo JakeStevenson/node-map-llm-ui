@@ -106,6 +106,12 @@ try {
   // Column already exists, ignore error
 }
 
+try {
+  db.exec('ALTER TABLE chats ADD COLUMN custom_summary_prompt TEXT');
+} catch {
+  // Column already exists, ignore error
+}
+
 // Migration: Add variation tracking columns if they don't exist
 try {
   db.exec('ALTER TABLE conversation_nodes ADD COLUMN is_variation INTEGER DEFAULT 0');

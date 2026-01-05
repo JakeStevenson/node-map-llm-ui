@@ -31,6 +31,7 @@ interface DbChatRow {
   name: string;
   activeNodeId: string | null;
   systemPrompt: string | null;
+  customSummaryPrompt: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -77,7 +78,7 @@ router.get('/:id', (req: Request, res: Response) => {
   try {
     const chat = db.prepare(`
       SELECT id, name, active_node_id as activeNodeId,
-             system_prompt as systemPrompt,
+             system_prompt as systemPrompt, custom_summary_prompt as customSummaryPrompt,
              created_at as createdAt, updated_at as updatedAt
       FROM chats WHERE id = ?
     `).get(req.params.id) as DbChatRow | undefined;
@@ -148,6 +149,7 @@ router.get('/:id', (req: Request, res: Response) => {
       name: chat.name,
       activeNodeId: chat.activeNodeId,
       systemPrompt: chat.systemPrompt,
+      customSummaryPrompt: chat.customSummaryPrompt,
       createdAt: chat.createdAt,
       updatedAt: chat.updatedAt,
       nodes: assembledNodes,
@@ -161,20 +163,21 @@ router.get('/:id', (req: Request, res: Response) => {
 // POST /api/chats - Create new chat
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { name = 'Untitled', systemPrompt = null } = req.body;
+    const { name = 'Untitled', systemPrompt = null, customSummaryPrompt = null } = req.body;
     const id = generateId();
     const now = Date.now();
 
     db.prepare(`
-      INSERT INTO chats (id, name, system_prompt, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, name, systemPrompt, now, now);
+      INSERT INTO chats (id, name, system_prompt, custom_summary_prompt, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, name, systemPrompt, customSummaryPrompt, now, now);
 
     res.status(201).json({
       id,
       name,
       activeNodeId: null,
       systemPrompt,
+      customSummaryPrompt,
       createdAt: now,
       updatedAt: now,
       nodes: [],
@@ -188,7 +191,7 @@ router.post('/', (req: Request, res: Response) => {
 // PUT /api/chats/:id - Update chat (name, activeNodeId, systemPrompt)
 router.put('/:id', (req: Request, res: Response) => {
   try {
-    const { name, activeNodeId, systemPrompt } = req.body;
+    const { name, activeNodeId, systemPrompt, customSummaryPrompt } = req.body;
     const now = Date.now();
 
     // SECURITY: Whitelist of allowed fields with their column names
@@ -197,20 +200,22 @@ router.put('/:id', (req: Request, res: Response) => {
       name?: string;
       activeNodeId?: string | null;
       systemPrompt?: string | null;
+      customSummaryPrompt?: string | null;
     };
 
     // Map request fields to SQL columns (explicit whitelist)
     const ALLOWED_COLUMNS: Record<keyof AllowedUpdateFields, string> = {
       name: 'name',
       activeNodeId: 'active_node_id',
-      systemPrompt: 'system_prompt'
+      systemPrompt: 'system_prompt',
+      customSummaryPrompt: 'custom_summary_prompt'
     };
 
     const updates: string[] = ['updated_at = ?'];
     const params: (string | number | null)[] = [now];
 
     // Build updates only from whitelisted fields
-    const fieldUpdates: AllowedUpdateFields = { name, activeNodeId, systemPrompt };
+    const fieldUpdates: AllowedUpdateFields = { name, activeNodeId, systemPrompt, customSummaryPrompt };
 
     for (const [field, value] of Object.entries(fieldUpdates)) {
       if (value !== undefined) {

@@ -14,7 +14,7 @@ A visual conversation tree interface for interacting with Large Language Models.
 - **Merge Nodes**: Combine multiple conversation branches into a single context for the LLM
 - **Context Management**: Real-time context window tracking with visual indicators and warnings
   - Token usage visualization on nodes and in sidebar
-  - Auto-summarization to compress older messages
+  - Custom summarization with dialog-based guidance and review
   - Manual node deletion and pruning tools
   - Per-branch context percentage indicators
 - **Multiple Chat Management**: Create, switch between, and delete separate conversation sessions
@@ -131,7 +131,11 @@ The app tracks context window usage to prevent exceeding model limits:
   - Yellow: 80-94% (warning)
   - Red: 95%+ (critical)
 - **Node Badges**: Context percentage appears on canvas nodes when above 60%
-- **Summarization**: Right-click any node and select "Summarize up to here" to compress older messages
+- **Custom Summarization**: Right-click any node and select "Summarize up to here" to compress older messages
+  - **Prompt Dialog**: Customize what aspects are most important to preserve (key decisions, technical details, action items, etc.)
+  - **Review Dialog**: Edit the generated summary or retry with different guidance
+  - **Prompt Memory**: Your summarization preferences are remembered per conversation
+  - User guidance is combined with comprehensive system instructions for optimal results
 - **Node Deletion**: Right-click nodes to delete them (with confirmation for nodes with children)
 - **Auto-detection**: Model context limits are auto-detected for common models (Llama, Mistral, etc.)
 
