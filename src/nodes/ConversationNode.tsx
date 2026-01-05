@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import { SearchIcon } from '../components/icons';
+import { MarkdownContent } from '../components/MarkdownContent';
 
 export interface ConversationNodeData extends Record<string, unknown> {
   role: 'user' | 'assistant';
@@ -130,7 +131,7 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
         ) : (
           /* Normal display */
           <div className="break-words leading-snug line-clamp-3">
-            {displayContent}
+            <MarkdownContent content={displayContent} />
           </div>
         )}
 

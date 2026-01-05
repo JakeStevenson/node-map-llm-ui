@@ -1,6 +1,7 @@
 import { memo, useState, useCallback } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import { useConversationStore } from '../store/conversationStore';
+import { MarkdownContent } from '../components/MarkdownContent';
 
 export interface SummaryNodeData extends Record<string, unknown> {
   content: string;  // The summary text
@@ -132,7 +133,7 @@ function SummaryNodeComponent({ data, selected, id }: NodeProps<SummaryNodeType>
           </div>
         ) : (
           <div className="text-left text-xs leading-snug text-[var(--color-text-primary)] break-words">
-            {displayContent}
+            <MarkdownContent content={displayContent} />
           </div>
         )}
 

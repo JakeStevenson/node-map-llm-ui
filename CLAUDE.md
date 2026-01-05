@@ -17,6 +17,11 @@ Visual conversation tree interface for LLMs with DAG-based conversation branchin
 - **Model auto-detection**: Context limits detected for Llama, Mistral, Qwen, CodeLlama, etc.
 - **Performance optimizations**: Token caching, memoized calculations, debounced UI (150ms)
 
+#### Markdown Rendering
+- **Formatted content**: Nodes render markdown instead of raw syntax (bold, italic, code, lists, etc.)
+- **Compact styling**: Custom component optimized for small node displays
+- **Interactive links**: Clickable links that open in new tabs without triggering node selection
+
 #### Node Types
 1. **ConversationNode** - Regular user/assistant messages (~220px width)
 2. **MergeNode** - Circular nodes combining multiple branches (amber/gold styling)
@@ -32,9 +37,10 @@ Visual conversation tree interface for LLMs with DAG-based conversation branchin
 - `/src/utils/debounce.ts` - Debouncing hook for performance
 
 **Node Components:**
-- `/src/nodes/ConversationNode.tsx` - Standard message nodes
+- `/src/nodes/ConversationNode.tsx` - Standard message nodes with markdown rendering
 - `/src/nodes/MergeNode.tsx` - Merge point nodes
-- `/src/nodes/SummaryNode.tsx` - Summary nodes (280px width, left-aligned text, 200 char truncation)
+- `/src/nodes/SummaryNode.tsx` - Summary nodes (280px width, left-aligned text, 200 char truncation, markdown rendering)
+- `/src/components/MarkdownContent.tsx` - Reusable markdown renderer using react-markdown and remark-gfm
 
 **Layout:**
 - `/src/utils/layoutUtils.ts` - Dagre configuration (300px node width, 50px nodeSep, 60px rankSep)
