@@ -15,6 +15,7 @@ export interface ChatDetail {
   id: string;
   name: string;
   activeNodeId: string | null;
+  systemPrompt?: string;
   createdAt: number;
   updatedAt: number;
   nodes: ConversationNode[];
@@ -55,11 +56,11 @@ export async function fetchChat(id: string): Promise<ChatDetail> {
 }
 
 // Create a new chat
-export async function createChat(name?: string): Promise<ChatDetail> {
+export async function createChat(name?: string, systemPrompt?: string): Promise<ChatDetail> {
   const res = await fetch(`${API_BASE}/chats`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, systemPrompt }),
   });
   if (!res.ok) {
     throw new Error(`Failed to create chat: ${res.status}`);
@@ -67,10 +68,10 @@ export async function createChat(name?: string): Promise<ChatDetail> {
   return res.json();
 }
 
-// Update a chat (name and/or activeNodeId)
+// Update a chat (name, activeNodeId, and/or systemPrompt)
 export async function updateChat(
   id: string,
-  data: { name?: string; activeNodeId?: string | null }
+  data: { name?: string; activeNodeId?: string | null; systemPrompt?: string }
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/chats/${id}`, {
     method: 'PUT',

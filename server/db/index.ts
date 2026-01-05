@@ -100,6 +100,12 @@ try {
   // Column already exists, ignore error
 }
 
+try {
+  db.exec('ALTER TABLE chats ADD COLUMN system_prompt TEXT');
+} catch {
+  // Column already exists, ignore error
+}
+
 // Create indexes for context management queries
 try {
   db.exec('CREATE INDEX IF NOT EXISTS idx_nodes_exclude_context ON conversation_nodes(exclude_from_context)');

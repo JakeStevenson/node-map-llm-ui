@@ -13,6 +13,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     endpoint,
     apiKey,
     model,
+    defaultSystemPrompt,
     availableModels,
     isLoadingModels,
     modelsError,
@@ -24,12 +25,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     setAvailableModels,
     setIsLoadingModels,
     setModelsError,
+    setDefaultSystemPrompt,
     updateWebSearchConfig,
     fetchServerSearchConfig,
   } = useSettingsStore();
 
   const [localEndpoint, setLocalEndpoint] = useState(endpoint);
   const [localApiKey, setLocalApiKey] = useState(apiKey);
+  const [localDefaultPrompt, setLocalDefaultPrompt] = useState(defaultSystemPrompt);
 
   // Web search local state
   const [localSearchEnabled, setLocalSearchEnabled] = useState(webSearch.enabled);
@@ -49,11 +52,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     if (isOpen) {
       setLocalEndpoint(endpoint);
       setLocalApiKey(apiKey);
+      setLocalDefaultPrompt(defaultSystemPrompt);
       setLocalSearchEnabled(webSearch.enabled);
       setLocalSearchMaxResults(webSearch.maxResults);
       setSearchTestResult(null);
     }
-  }, [isOpen, endpoint, apiKey, webSearch]);
+  }, [isOpen, endpoint, apiKey, defaultSystemPrompt, webSearch]);
 
   // Fetch models when endpoint/key changes
   const handleFetchModels = useCallback(async () => {
@@ -99,6 +103,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
       endpoint: localEndpoint,
       apiKey: localApiKey,
     });
+    setDefaultSystemPrompt(localDefaultPrompt);
     updateWebSearchConfig({
       enabled: localSearchEnabled,
       maxResults: localSearchMaxResults,
@@ -232,6 +237,27 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
               </select>
             </div>
           )}
+
+          {/* Default System Prompt */}
+          <div>
+            <label
+              htmlFor="defaultPrompt"
+              className="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+            >
+              Default System Prompt (Optional)
+            </label>
+            <textarea
+              id="defaultPrompt"
+              value={localDefaultPrompt}
+              onChange={(e) => setLocalDefaultPrompt(e.target.value)}
+              placeholder="You are a helpful assistant..."
+              rows={4}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent resize-y"
+            />
+            <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+              This will be used for new chats. Can be overridden per conversation.
+            </p>
+          </div>
 
           {/* Web Search Section */}
           <div className="pt-4 border-t border-[var(--color-border)]">

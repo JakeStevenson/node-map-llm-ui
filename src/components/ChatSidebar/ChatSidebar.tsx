@@ -22,6 +22,8 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
   const [editedName, setEditedName] = useState('');
   const [isMerging, setIsMerging] = useState(false);
   const [searchEnabled, setSearchEnabled] = useState(false);  // Manual search toggle
+  const [showSystemPromptDialog, setShowSystemPromptDialog] = useState<boolean>(false);
+  const [editedSystemPrompt, setEditedSystemPrompt] = useState<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -35,6 +37,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     searchQuery,
     error,
     chatName,
+    chatSystemPrompt,
     selectedNodeIds,
     nodes,
     activeNodeId,
@@ -47,6 +50,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     setError,
     clearTree,
     renameChat,
+    updateSystemPrompt,
     clearNodeSelection,
     getMessagesForLLM,
     getMessagesForNode,
@@ -133,6 +137,17 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     } else if (e.key === 'Escape') {
       setIsEditingName(false);
     }
+  };
+
+  // Handle edit system prompt
+  const handleEditSystemPrompt = () => {
+    setEditedSystemPrompt(chatSystemPrompt || '');
+    setShowSystemPromptDialog(true);
+  };
+
+  const handleSaveSystemPrompt = () => {
+    updateSystemPrompt(editedSystemPrompt.trim());
+    setShowSystemPromptDialog(false);
   };
 
   // Handle send message
@@ -293,6 +308,21 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
               <TrashIcon />
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleEditSystemPrompt}
+            className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)] rounded-lg transition-colors"
+            aria-label="Edit system prompt"
+            title="Edit system prompt"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </button>
           <button
             type="button"
             onClick={onOpenSettings}
@@ -533,6 +563,46 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
           )}
         </div>
       </div>
+
+      {/* System Prompt Dialog */}
+      {showSystemPromptDialog && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--color-surface)] rounded-lg p-6 w-full max-w-md m-4 border border-[var(--color-border)]">
+            <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">
+              System Prompt
+            </h3>
+
+            <div className="mb-4">
+              <textarea
+                value={editedSystemPrompt}
+                onChange={(e) => setEditedSystemPrompt(e.target.value)}
+                placeholder="You are a helpful assistant..."
+                rows={8}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] resize-y"
+                autoFocus
+              />
+              <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
+                This system prompt will be used for all messages in this conversation.
+              </p>
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowSystemPromptDialog(false)}
+                className="px-4 py-2 text-sm font-medium text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-background)]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveSystemPrompt}
+                className="px-4 py-2 text-sm font-medium text-white bg-[var(--color-accent)] rounded-lg hover:opacity-90"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

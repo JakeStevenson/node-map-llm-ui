@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useConversationStore } from '../../store/conversationStore';
+import { useSettingsStore } from '../../store/settingsStore';
 
 interface ChatsModalProps {
   isOpen: boolean;
@@ -15,6 +16,12 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
     deleteChat,
   } = useConversationStore();
 
+  const { getDefaultSystemPrompt } = useSettingsStore();
+
+  const [showNewChatDialog, setShowNewChatDialog] = useState(false);
+  const [newChatName, setNewChatName] = useState('');
+  const [newChatPrompt, setNewChatPrompt] = useState('');
+
   // Handle key press for modal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -29,7 +36,15 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
   if (!isOpen) return null;
 
   const handleNewChat = () => {
-    createChat();
+    setNewChatName('');
+    setNewChatPrompt(getDefaultSystemPrompt());
+    setShowNewChatDialog(true);
+  };
+
+  const handleCreateChat = () => {
+    const name = newChatName.trim() || 'Untitled';
+    createChat(name, newChatPrompt.trim() || undefined);
+    setShowNewChatDialog(false);
     onClose();
   };
 
@@ -145,6 +160,60 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
             Close
           </button>
         </div>
+
+        {/* New Chat Dialog */}
+        {showNewChatDialog && (
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-xl">
+            <div className="bg-[var(--color-surface)] rounded-lg p-6 w-full max-w-sm m-4 border border-[var(--color-border)]">
+              <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">
+                New Chat
+              </h3>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
+                    Chat Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newChatName}
+                    onChange={(e) => setNewChatName(e.target.value)}
+                    placeholder="Untitled"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
+                    System Prompt (Optional)
+                  </label>
+                  <textarea
+                    value={newChatPrompt}
+                    onChange={(e) => setNewChatPrompt(e.target.value)}
+                    placeholder="You are a helpful assistant..."
+                    rows={4}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] resize-y"
+                  />
+                </div>
+
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowNewChatDialog(false)}
+                    className="px-4 py-2 text-sm font-medium text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-background)]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreateChat}
+                    className="px-4 py-2 text-sm font-medium text-white bg-[var(--color-accent)] rounded-lg hover:opacity-90"
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

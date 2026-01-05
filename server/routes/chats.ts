@@ -28,6 +28,7 @@ interface DbChatRow {
   id: string;
   name: string;
   activeNodeId: string | null;
+  systemPrompt: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -72,6 +73,7 @@ router.get('/:id', (req: Request, res: Response) => {
   try {
     const chat = db.prepare(`
       SELECT id, name, active_node_id as activeNodeId,
+             system_prompt as systemPrompt,
              created_at as createdAt, updated_at as updatedAt
       FROM chats WHERE id = ?
     `).get(req.params.id) as DbChatRow | undefined;
@@ -138,6 +140,7 @@ router.get('/:id', (req: Request, res: Response) => {
       id: chat.id,
       name: chat.name,
       activeNodeId: chat.activeNodeId,
+      systemPrompt: chat.systemPrompt,
       createdAt: chat.createdAt,
       updatedAt: chat.updatedAt,
       nodes: assembledNodes,
@@ -151,19 +154,20 @@ router.get('/:id', (req: Request, res: Response) => {
 // POST /api/chats - Create new chat
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { name = 'Untitled' } = req.body;
+    const { name = 'Untitled', systemPrompt = null } = req.body;
     const id = generateId();
     const now = Date.now();
 
     db.prepare(`
-      INSERT INTO chats (id, name, created_at, updated_at)
-      VALUES (?, ?, ?, ?)
-    `).run(id, name, now, now);
+      INSERT INTO chats (id, name, system_prompt, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, name, systemPrompt, now, now);
 
     res.status(201).json({
       id,
       name,
       activeNodeId: null,
+      systemPrompt,
       createdAt: now,
       updatedAt: now,
       nodes: [],
@@ -174,10 +178,10 @@ router.post('/', (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/chats/:id - Update chat (name, activeNodeId)
+// PUT /api/chats/:id - Update chat (name, activeNodeId, systemPrompt)
 router.put('/:id', (req: Request, res: Response) => {
   try {
-    const { name, activeNodeId } = req.body;
+    const { name, activeNodeId, systemPrompt } = req.body;
     const now = Date.now();
 
     const updates: string[] = ['updated_at = ?'];
@@ -190,6 +194,10 @@ router.put('/:id', (req: Request, res: Response) => {
     if (activeNodeId !== undefined) {
       updates.push('active_node_id = ?');
       params.push(activeNodeId);
+    }
+    if (systemPrompt !== undefined) {
+      updates.push('system_prompt = ?');
+      params.push(systemPrompt);
     }
 
     params.push(req.params.id);

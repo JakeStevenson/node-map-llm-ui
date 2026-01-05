@@ -8,6 +8,7 @@ import { useSettingsStore } from './settingsStore';
 interface Chat {
   id: string;
   name: string;
+  systemPrompt?: string;
   nodes: ConversationNode[];
   activeNodeId: string | null;
   createdAt: number;
@@ -29,6 +30,7 @@ interface ConversationState {
   selectedNodeIds: string[];  // Multi-select for merge feature
   messages: Message[];
   chatName: string;
+  chatSystemPrompt: string | undefined;
 
   // Streaming state
   isStreaming: boolean;
@@ -46,10 +48,11 @@ interface ConversationState {
   initFromApi: () => Promise<void>;
 
   // Chat management actions
-  createChat: (name?: string) => void;
+  createChat: (name?: string, systemPrompt?: string) => void;
   switchChat: (chatId: string) => void;
   deleteChat: (chatId: string) => void;
   renameChat: (name: string) => void;
+  updateSystemPrompt: (systemPrompt: string) => void;
 
   // Tree Actions
   addNode: (role: 'user' | 'assistant', content: string, parentId: string | null, searchMetadata?: SearchMetadata) => string;
@@ -192,9 +195,10 @@ const validateMergeNodes = (
 };
 
 // Helper to create a new chat locally
-const createNewChatLocal = (name: string = 'Untitled'): Chat => ({
+const createNewChatLocal = (name: string = 'Untitled', systemPrompt?: string): Chat => ({
   id: generateId(),
   name,
+  systemPrompt,
   nodes: [],
   activeNodeId: null,
   createdAt: Date.now(),
@@ -295,6 +299,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   selectedNodeIds: [],
   messages: [],
   chatName: 'Untitled',
+  chatSystemPrompt: undefined,
   isStreaming: false,
   streamingContent: '',
   streamingParentId: null,
@@ -316,6 +321,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           chats: [{
             id: newChat.id,
             name: newChat.name,
+            systemPrompt: newChat.systemPrompt,
             nodes: [],
             activeNodeId: null,
             createdAt: newChat.createdAt,
@@ -326,6 +332,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           selectedNodeId: null,
           messages: [],
           chatName: 'Untitled',
+          chatSystemPrompt: newChat.systemPrompt,
           isLoading: false,
           isInitialized: true,
         });
@@ -343,6 +350,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         const chats: Chat[] = chatSummaries.map((c) => ({
           id: c.id,
           name: c.name,
+          systemPrompt: c.id === mostRecentId ? chatDetail.systemPrompt : undefined,
           nodes: c.id === mostRecentId ? chatDetail.nodes : [],
           activeNodeId: c.id === mostRecentId ? chatDetail.activeNodeId : null,
           createdAt: c.createdAt,
@@ -360,6 +368,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           selectedNodeId: chatDetail.activeNodeId,
           messages: buildMessagesFromPath(path),
           chatName: chatDetail.name,
+          chatSystemPrompt: chatDetail.systemPrompt,
           isLoading: false,
           isInitialized: true,
         });
@@ -384,9 +393,9 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   },
 
   // Create a new chat
-  createChat: (name = 'Untitled') => {
+  createChat: (name = 'Untitled', systemPrompt?: string) => {
     const { chats } = get();
-    const newChat = createNewChatLocal(name);
+    const newChat = createNewChatLocal(name, systemPrompt);
 
     set({
       chats: [...chats, newChat],
@@ -397,16 +406,17 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       selectedNodeIds: [],
       messages: [],
       chatName: name,
+      chatSystemPrompt: systemPrompt,
       error: null,
     });
 
     // Sync to API in background
     syncInBackground(async () => {
-      const created = await api.createChat(name);
+      const created = await api.createChat(name, systemPrompt);
       // Update local ID with server ID
       set((state) => ({
         chats: state.chats.map((c) =>
-          c.id === newChat.id ? { ...c, id: created.id } : c
+          c.id === newChat.id ? { ...c, id: created.id, systemPrompt: created.systemPrompt } : c
         ),
         activeChatId: state.activeChatId === newChat.id ? created.id : state.activeChatId,
       }));
@@ -415,7 +425,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
   // Switch to a different chat
   switchChat: async (chatId) => {
-    const { chats, activeChatId, nodes, activeNodeId, chatName } = get();
+    const { chats, activeChatId, nodes, activeNodeId, chatName, chatSystemPrompt } = get();
 
     const targetChat = chats.find((c) => c.id === chatId);
     if (!targetChat) return;
@@ -423,7 +433,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     // Save current chat state to chats array
     const updatedChats = chats.map((chat) =>
       chat.id === activeChatId
-        ? { ...chat, nodes, activeNodeId, name: chatName }
+        ? { ...chat, nodes, activeNodeId, name: chatName, systemPrompt: chatSystemPrompt }
         : chat
     );
 
@@ -441,7 +451,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
         const chatsWithLoaded = updatedChats.map((c) =>
           c.id === chatId
-            ? { ...c, nodes: chatDetail.nodes, activeNodeId: chatDetail.activeNodeId }
+            ? { ...c, nodes: chatDetail.nodes, activeNodeId: chatDetail.activeNodeId, systemPrompt: chatDetail.systemPrompt }
             : c
         );
 
@@ -454,6 +464,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
           selectedNodeIds: [],
           messages: buildMessagesFromPath(path),
           chatName: chatDetail.name,
+          chatSystemPrompt: chatDetail.systemPrompt,
           isLoading: false,
           error: null,
         });
@@ -476,6 +487,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         selectedNodeIds: [],
         messages: buildMessagesFromPath(path),
         chatName: targetChat.name,
+        chatSystemPrompt: targetChat.systemPrompt,
         error: null,
       });
     }
@@ -542,6 +554,22 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     // Sync to API
     if (activeChatId) {
       syncInBackground(() => api.updateChat(activeChatId, { name }));
+    }
+  },
+
+  // Update system prompt for current chat
+  updateSystemPrompt: (systemPrompt) => {
+    const { chats, activeChatId } = get();
+
+    const updatedChats = chats.map((chat) =>
+      chat.id === activeChatId ? { ...chat, systemPrompt } : chat
+    );
+
+    set({ chats: updatedChats, chatSystemPrompt: systemPrompt });
+
+    // Sync to API
+    if (activeChatId) {
+      syncInBackground(() => api.updateChat(activeChatId, { systemPrompt }));
     }
   },
 
@@ -1108,9 +1136,27 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   },
 
   getMessagesForLLM: () => {
-    const { activeNodeId, nodes } = get();
+    const { activeNodeId, nodes, chatSystemPrompt } = get();
     if (!activeNodeId) return [];
-    return buildMessagesForLLM(activeNodeId, nodes);
+
+    const messages = buildMessagesForLLM(activeNodeId, nodes);
+
+    // IMPORTANT: Only prepend system message if prompt exists and is non-empty
+    // If no system prompt provided, behave exactly as current system (no system message)
+    if (chatSystemPrompt && chatSystemPrompt.trim()) {
+      return [
+        {
+          id: 'system-prompt',
+          role: 'system' as const,
+          content: chatSystemPrompt,
+          createdAt: 0,  // Ensure it's first
+        },
+        ...messages,
+      ];
+    }
+
+    // No system prompt = return messages as-is (current behavior)
+    return messages;
   },
 
   getMessagesForNode: (nodeId) => {

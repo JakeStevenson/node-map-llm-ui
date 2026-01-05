@@ -10,6 +10,9 @@ interface SettingsState {
   apiKey: string;
   model: string;
 
+  // Default System Prompt
+  defaultSystemPrompt: string;
+
   // Web Search Config (client preferences)
   webSearch: WebSearchConfig;
 
@@ -34,6 +37,10 @@ interface SettingsState {
   setIsLoadingModels: (loading: boolean) => void;
   setModelsError: (error: string | null) => void;
   getConfig: () => LLMConfig;
+
+  // Default System Prompt Actions
+  setDefaultSystemPrompt: (prompt: string) => void;
+  getDefaultSystemPrompt: () => string;
 
   // Web Search Actions
   setWebSearchEnabled: (enabled: boolean) => void;
@@ -75,6 +82,7 @@ export const useSettingsStore = create<SettingsState>()(
       endpoint: DEFAULT_ENDPOINT,
       apiKey: '',
       model: '',
+      defaultSystemPrompt: '',
       webSearch: DEFAULT_WEB_SEARCH,
       contextConfig: DEFAULT_CONTEXT_CONFIG,
       serverSearchConfig: null,
@@ -124,6 +132,10 @@ export const useSettingsStore = create<SettingsState>()(
         apiKey: get().apiKey,
         model: get().model,
       }),
+
+      // Default System Prompt Actions
+      setDefaultSystemPrompt: (prompt) => set({ defaultSystemPrompt: prompt }),
+      getDefaultSystemPrompt: () => get().defaultSystemPrompt,
 
       // Web Search Actions
       setWebSearchEnabled: (enabled) =>
@@ -192,6 +204,7 @@ export const useSettingsStore = create<SettingsState>()(
         endpoint: state.endpoint,
         apiKey: state.apiKey,
         model: state.model,
+        defaultSystemPrompt: state.defaultSystemPrompt,
         webSearch: state.webSearch,
         contextConfig: state.contextConfig,
       }),
