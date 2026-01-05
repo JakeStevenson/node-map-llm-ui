@@ -110,13 +110,23 @@ export async function createNode(
 }
 
 // Delete a node
-export async function deleteNode(id: string): Promise<void> {
+export async function deleteNode(id: string): Promise<{ deleted: boolean; reason?: string }> {
   const res = await fetch(`${API_BASE}/chats/nodes/${id}`, {
     method: 'DELETE',
   });
-  if (!res.ok) {
-    throw new Error(`Failed to delete node: ${res.status}`);
+
+  if (res.ok) {
+    return { deleted: true };
   }
+
+  // Handle 404 gracefully - node doesn't exist on server (already deleted or never synced)
+  if (res.status === 404) {
+    console.warn(`Node ${id} not found on server (may have never synced)`);
+    return { deleted: false, reason: 'not_found' };
+  }
+
+  // Other errors are actual failures
+  throw new Error(`Failed to delete node: ${res.status} ${res.statusText}`);
 }
 
 // Update node content

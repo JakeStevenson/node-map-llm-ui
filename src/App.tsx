@@ -3,6 +3,7 @@ import { CanvasView } from './components/Canvas';
 import { ChatSidebar } from './components/ChatSidebar';
 import { SettingsModal } from './components/Settings';
 import { ChatsModal } from './components/Chats';
+import { SyncErrorNotification } from './components/SyncErrorNotification';
 import { useConversationStore, hasPendingSyncs } from './store/conversationStore';
 
 const MIN_VIEWPORT_WIDTH = 1024;
@@ -196,6 +197,9 @@ export default function App(): JSX.Element {
 
       {/* Chats Modal */}
       <ChatsModal isOpen={isChatsOpen} onClose={handleCloseChats} />
+
+      {/* Sync Error Notification */}
+      <SyncErrorNotification />
     </>
   );
 }

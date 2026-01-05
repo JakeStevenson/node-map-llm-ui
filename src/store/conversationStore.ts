@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Message, ConversationNode, BranchSummary, SearchMetadata, ContextStatus } from '../types';
+import type { Message, ConversationNode, BranchSummary, SearchMetadata, ContextStatus, SyncState, SyncError } from '../types';
 import * as api from '../services/apiService';
 import { calculatePathContext, estimateTokens } from '../services/contextService';
 import { useSettingsStore } from './settingsStore';
@@ -43,6 +43,7 @@ interface ConversationState {
 
   // Error state
   error: string | null;
+  syncState: SyncState;
 
   // Initialization
   initFromApi: () => Promise<void>;
@@ -78,6 +79,7 @@ interface ConversationState {
   finalizeStreamingWithSearch: (searchMetadata?: SearchMetadata) => void;
   setIsSearching: (searching: boolean, query?: string) => void;
   setError: (error: string | null) => void;
+  clearSyncErrors: () => void;
 
   // Computed helpers
   getPathToNode: (nodeId: string) => ConversationNode[];
@@ -86,6 +88,14 @@ interface ConversationState {
   getMessagesForNode: (nodeId: string) => Message[];
   getContextStatus: () => ContextStatus;
   validateMerge: (nodeIds: string[]) => { valid: boolean; error?: string };
+}
+
+// Node sync status tracking
+enum NodeSyncStatus {
+  UNSYNCED = 'unsynced',   // Created locally, not sent to server yet
+  SYNCING = 'syncing',     // Currently being sent to server
+  SYNCED = 'synced',       // Confirmed on server
+  FAILED = 'failed'        // Sync failed after retries
 }
 
 const generateId = (): string => {
@@ -204,10 +214,101 @@ const createNewChatLocal = (name: string = 'Untitled', systemPrompt?: string): C
   createdAt: Date.now(),
 });
 
-// Background sync helper - fire and forget with error logging
-const syncInBackground = (action: () => Promise<unknown>) => {
-  action().catch((error) => {
-    console.error('Background sync failed:', error);
+// Sync configuration
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAYS = [1000, 3000, 5000]; // Exponential backoff in milliseconds
+const SYNC_TIMEOUT = 10000; // 10 seconds
+
+// Track failed syncs separately from pending
+const failedNodeSyncs = new Map<string, SyncError>();
+const retryTimeouts = new Map<string, NodeJS.Timeout>();
+
+// Enhanced sync with retry and error tracking
+const syncWithRetry = async (
+  id: string,
+  type: 'node' | 'chat',
+  action: () => Promise<unknown>,
+  retryCount = 0
+): Promise<void> => {
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Sync timeout')), SYNC_TIMEOUT)
+  );
+
+  try {
+    await Promise.race([action(), timeoutPromise]);
+
+    // Success: cleanup
+    if (type === 'node') {
+      failedNodeSyncs.delete(id);
+      syncedNodes.add(id);
+      nodeSyncStatus.set(id, NodeSyncStatus.SYNCED);
+      pendingNodeSyncs.delete(id);
+    }
+
+    // Update store to clear error for this ID
+    const state = useConversationStore.getState();
+    useConversationStore.setState({
+      syncState: {
+        ...state.syncState,
+        pending: state.syncState.pending.filter((pid) => pid !== id),
+        failed: state.syncState.failed.filter((f) => f.nodeId !== id && f.chatId !== id),
+      },
+    });
+  } catch (error) {
+    const err = error as Error;
+    const isNetworkError = error instanceof TypeError || err.message === 'Sync timeout';
+    const errorType: SyncError['type'] =
+      err.message === 'Sync timeout' ? 'timeout' : isNetworkError ? 'network' : 'server';
+
+    const syncError: SyncError = {
+      type: errorType,
+      message: error instanceof Error ? error.message : 'Unknown error',
+      nodeId: type === 'node' ? id : undefined,
+      chatId: type === 'chat' ? id : undefined,
+      timestamp: Date.now(),
+      retryCount,
+    };
+
+    if (retryCount < MAX_RETRY_ATTEMPTS) {
+      // Schedule retry with exponential backoff
+      const delay = RETRY_DELAYS[retryCount];
+      console.warn(
+        `Sync failed for ${id}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRY_ATTEMPTS})`
+      );
+
+      const timeout = setTimeout(() => {
+        retryTimeouts.delete(id);
+        syncWithRetry(id, type, action, retryCount + 1);
+      }, delay);
+
+      retryTimeouts.set(id, timeout);
+    } else {
+      // Max retries exceeded
+      console.error(`Sync permanently failed for ${id} after ${MAX_RETRY_ATTEMPTS} attempts:`, error);
+
+      if (type === 'node') {
+        failedNodeSyncs.set(id, syncError);
+        nodeSyncStatus.set(id, NodeSyncStatus.FAILED);
+        pendingNodeSyncs.delete(id);
+      }
+
+      // Update store with error
+      const state = useConversationStore.getState();
+      useConversationStore.setState({
+        syncState: {
+          pending: state.syncState.pending.filter((pid) => pid !== id),
+          failed: [...state.syncState.failed, syncError],
+          lastError: syncError,
+        },
+      });
+    }
+  }
+};
+
+// Background sync helper - now uses syncWithRetry
+const syncInBackground = (id: string, type: 'node' | 'chat', action: () => Promise<unknown>) => {
+  syncWithRetry(id, type, action).catch(() => {
+    // Already handled in syncWithRetry
   });
 };
 
@@ -219,6 +320,7 @@ const knownServerChats = new Set<string>(); // IDs known to exist on server
 // Track node syncs to ensure parent nodes are synced before children
 const pendingNodeSyncs = new Map<string, Promise<void>>();
 const syncedNodes = new Set<string>(); // Node IDs known to exist on server
+const nodeSyncStatus = new Map<string, NodeSyncStatus>(); // Track sync status of each node
 
 // Check if there are any pending syncs (chat or node)
 export const hasPendingSyncs = (): boolean => {
@@ -244,17 +346,38 @@ const markChatAsSynced = (chatId: string) => {
 // Mark node IDs as synced (called when loading nodes from API)
 const markNodeAsSynced = (nodeId: string) => {
   syncedNodes.add(nodeId);
+  nodeSyncStatus.set(nodeId, NodeSyncStatus.SYNCED);
 };
 
-// Wait for a node to be synced to the server (returns immediately if already synced)
-const waitForNodeSync = async (nodeId: string | null): Promise<void> => {
-  if (!nodeId) return;
-  if (syncedNodes.has(nodeId)) return;
+// Wait for a node to be synced to the server (returns sync status)
+const waitForNodeSync = async (nodeId: string | null, timeoutMs = 30000): Promise<NodeSyncStatus> => {
+  if (!nodeId) return NodeSyncStatus.SYNCED;
+
+  // Check status first
+  const status = nodeSyncStatus.get(nodeId);
+  if (status === NodeSyncStatus.SYNCED) return NodeSyncStatus.SYNCED;
+  if (status === NodeSyncStatus.FAILED) return NodeSyncStatus.FAILED;
 
   const pending = pendingNodeSyncs.get(nodeId);
-  if (pending) {
-    await pending;
+  if (!pending) {
+    // Not in pending map but not synced = probably never synced
+    return NodeSyncStatus.UNSYNCED;
   }
+
+  // Wait for sync with timeout
+  const timeoutPromise = new Promise<NodeSyncStatus>((resolve) =>
+    setTimeout(() => {
+      console.warn(`Sync timeout for node ${nodeId}`);
+      nodeSyncStatus.set(nodeId, NodeSyncStatus.FAILED);
+      resolve(NodeSyncStatus.FAILED);
+    }, timeoutMs)
+  );
+
+  const syncPromise = pending.then(() => {
+    return nodeSyncStatus.get(nodeId) || NodeSyncStatus.SYNCED;
+  });
+
+  return Promise.race([syncPromise, timeoutPromise]);
 };
 
 // Ensure chat exists on server, returns the server chat ID
@@ -306,6 +429,11 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   isSearching: false,
   searchQuery: null,
   error: null,
+  syncState: {
+    pending: [],
+    failed: [],
+    lastError: null,
+  },
 
   // Initialize from API
   initFromApi: async () => {
@@ -411,7 +539,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     });
 
     // Sync to API in background
-    syncInBackground(async () => {
+    syncInBackground(newChat.id, 'chat', async () => {
       const created = await api.createChat(name, systemPrompt);
       // Update local ID with server ID
       set((state) => ({
@@ -531,14 +659,14 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         });
 
         // Sync new chat creation
-        syncInBackground(() => api.createChat('Untitled'));
+        syncInBackground(newChat.id, 'chat', () => api.createChat('Untitled'));
       }
     } else {
       set({ chats: updatedChats });
     }
 
     // Sync deletion to API
-    syncInBackground(() => api.deleteChat(chatId));
+    syncInBackground(chatId, 'chat', () => api.deleteChat(chatId));
   },
 
   // Rename current chat
@@ -553,7 +681,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
     // Sync to API
     if (activeChatId) {
-      syncInBackground(() => api.updateChat(activeChatId, { name }));
+      syncInBackground(activeChatId, 'chat', () => api.updateChat(activeChatId, { name }));
     }
   },
 
@@ -569,7 +697,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
     // Sync to API
     if (activeChatId) {
-      syncInBackground(() => api.updateChat(activeChatId, { systemPrompt }));
+      syncInBackground(activeChatId, 'chat', () => api.updateChat(activeChatId, { systemPrompt }));
     }
   },
 
@@ -610,7 +738,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       });
 
       // Sync: create chat then add node
-      syncInBackground(async () => {
+      syncInBackground(id, 'node', async () => {
         const created = await api.createChat(newChat.name);
 
         // Update local state with server ID
@@ -655,6 +783,8 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
     // Sync to API in background - ensure chat and parent node exist first
     const nodeSyncPromise = (async () => {
+      nodeSyncStatus.set(id, NodeSyncStatus.SYNCING); // Mark as syncing
+
       const serverChatId = await ensureChatSynced(activeChatId, chatName);
 
       // Update local state if server assigned a different ID
@@ -681,11 +811,12 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
       // Mark this node as synced
       syncedNodes.add(id);
+      nodeSyncStatus.set(id, NodeSyncStatus.SYNCED);
       pendingNodeSyncs.delete(id);
     })();
 
     pendingNodeSyncs.set(id, nodeSyncPromise);
-    syncInBackground(() => nodeSyncPromise);
+    syncInBackground(id, 'node', () => nodeSyncPromise);
 
     return id;
   },
@@ -762,7 +893,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       })();
 
       pendingNodeSyncs.set(id, nodeSyncPromise);
-      syncInBackground(() => nodeSyncPromise);
+      syncInBackground(id, 'node', () => nodeSyncPromise);
     }
 
     return id;
@@ -852,7 +983,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       })();
 
       pendingNodeSyncs.set(id, nodeSyncPromise);
-      syncInBackground(() => nodeSyncPromise);
+      syncInBackground(id, 'node', () => nodeSyncPromise);
     }
 
     return id;
@@ -901,7 +1032,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         await api.updateNodeContent(serverChatId, nodeId, newContent);
       })();
 
-      syncInBackground(() => updatePromise);
+      syncInBackground(nodeId, 'node', () => updatePromise);
     }
   },
 
@@ -951,18 +1082,53 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     });
 
     // Sync to API - delete all nodes in the branch
+    // Note: UI is already updated above, this is just server cleanup
     if (activeChatId) {
       const deletePromises = nodesToDelete.map(async (id) => {
-        await waitForNodeSync(id);
-        await api.deleteNode(id);
+        try {
+          // Check sync status first (5s timeout)
+          const status = await waitForNodeSync(id, 5000);
+
+          if (status === NodeSyncStatus.UNSYNCED || status === NodeSyncStatus.FAILED) {
+            // Node never made it to server, just clean up local tracking
+            console.info(`Node ${id} was never synced to server, skipping delete`);
+            pendingNodeSyncs.delete(id);
+            nodeSyncStatus.delete(id);
+            return;
+          }
+
+          // Node is/was synced, try to delete from server
+          const result = await api.deleteNode(id);
+
+          if (!result.deleted && result.reason === 'not_found') {
+            // Node not found on server (already deleted or race condition)
+            console.info(`Node ${id} not found on server, cleaning up local state`);
+          }
+
+          // Clean up tracking
+          syncedNodes.delete(id);
+          nodeSyncStatus.delete(id);
+          pendingNodeSyncs.delete(id);
+        } catch (error) {
+          // Log error but don't fail the whole deletion
+          // UI is already updated, this is just cleanup
+          console.error(`Failed to delete node ${id} from server:`, error);
+
+          // Still clean up local tracking to prevent future issues
+          syncedNodes.delete(id);
+          nodeSyncStatus.delete(id);
+          pendingNodeSyncs.delete(id);
+        }
       });
 
-      const deleteAllPromise = Promise.all(deletePromises);
-      syncInBackground(() => deleteAllPromise);
+      // Don't await - fire and forget, UI is already updated
+      Promise.all(deletePromises).catch((err) => {
+        console.error('Some node deletions failed:', err);
+      });
 
       // Update active node if changed
       if (newActiveNodeId !== activeNodeId) {
-        syncInBackground(() => api.updateChat(activeChatId, { activeNodeId: newActiveNodeId }));
+        syncInBackground(activeChatId, 'chat', () => api.updateChat(activeChatId, { activeNodeId: newActiveNodeId }));
       }
     }
   },
@@ -1006,7 +1172,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
     // Sync activeNodeId to API
     if (activeChatId) {
-      syncInBackground(() => api.updateChat(activeChatId, { activeNodeId: nodeId }));
+      syncInBackground(activeChatId, 'chat', () => api.updateChat(activeChatId, { activeNodeId: nodeId }));
     }
   },
 
@@ -1031,7 +1197,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
     // Sync to server - clear all nodes from this chat
     if (activeChatId) {
-      syncInBackground(() => api.clearChatNodes(activeChatId));
+      syncInBackground(activeChatId, 'chat', () => api.clearChatNodes(activeChatId));
     }
   },
 
@@ -1123,6 +1289,16 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   setIsSearching: (searching, query) => set({ isSearching: searching, searchQuery: query || null }),
 
   setError: (error) => set({ error, isStreaming: false, isSearching: false, searchQuery: null }),
+
+  clearSyncErrors: () => {
+    set((state) => ({
+      syncState: {
+        ...state.syncState,
+        failed: [],
+        lastError: null,
+      },
+    }));
+  },
 
   getPathToNode: (nodeId) => {
     const { nodes } = get();

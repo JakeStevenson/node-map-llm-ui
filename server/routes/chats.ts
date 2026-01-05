@@ -184,20 +184,34 @@ router.put('/:id', (req: Request, res: Response) => {
     const { name, activeNodeId, systemPrompt } = req.body;
     const now = Date.now();
 
+    // SECURITY: Whitelist of allowed fields with their column names
+    // TypeScript ensures only these fields can be updated
+    type AllowedUpdateFields = {
+      name?: string;
+      activeNodeId?: string | null;
+      systemPrompt?: string | null;
+    };
+
+    // Map request fields to SQL columns (explicit whitelist)
+    const ALLOWED_COLUMNS: Record<keyof AllowedUpdateFields, string> = {
+      name: 'name',
+      activeNodeId: 'active_node_id',
+      systemPrompt: 'system_prompt'
+    };
+
     const updates: string[] = ['updated_at = ?'];
     const params: (string | number | null)[] = [now];
 
-    if (name !== undefined) {
-      updates.push('name = ?');
-      params.push(name);
-    }
-    if (activeNodeId !== undefined) {
-      updates.push('active_node_id = ?');
-      params.push(activeNodeId);
-    }
-    if (systemPrompt !== undefined) {
-      updates.push('system_prompt = ?');
-      params.push(systemPrompt);
+    // Build updates only from whitelisted fields
+    const fieldUpdates: AllowedUpdateFields = { name, activeNodeId, systemPrompt };
+
+    for (const [field, value] of Object.entries(fieldUpdates)) {
+      if (value !== undefined) {
+        const key = field as keyof AllowedUpdateFields;
+        const columnName = ALLOWED_COLUMNS[key]; // Type-safe lookup
+        updates.push(`${columnName} = ?`);
+        params.push(value);
+      }
     }
 
     params.push(req.params.id);

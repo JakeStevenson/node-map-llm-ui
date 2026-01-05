@@ -101,6 +101,22 @@ export interface LLMError {
   status?: number;
 }
 
+// Sync Error Types
+export interface SyncError {
+  type: 'network' | 'server' | 'timeout';
+  message: string;
+  nodeId?: string;
+  chatId?: string;
+  timestamp: number;
+  retryCount: number;
+}
+
+export interface SyncState {
+  pending: string[];        // IDs of items being synced
+  failed: SyncError[];      // Failed syncs with retry info
+  lastError: SyncError | null;
+}
+
 // Context Management Types
 export interface ModelContextConfig {
   contextWindow: number;      // Total tokens the model can handle
