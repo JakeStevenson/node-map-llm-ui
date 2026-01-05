@@ -28,3 +28,7 @@ dist-server/
 
 # SQLite data
 data/
+
+# Uploaded documents
+uploads/*
+!uploads/.gitkeep

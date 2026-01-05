@@ -5,11 +5,16 @@ services:
       - "3002:3000"
     volumes:
       - node-map-data:/app/data
+      - ./uploads:/app/uploads
     environment:
       - NODE_ENV=production
       - DB_PATH=/app/data/conversations.db
       - PORT=3000
       - SEARXNG_ENDPOINT=http://host.docker.internal:8080
+      - MAX_UPLOAD_SIZE=52428800
+      # Embedding service configuration (uses Ollama by default)
+      - EMBEDDING_ENDPOINT=http://host.docker.internal:11434/v1
+      - EMBEDDING_MODEL=nomic-embed-text
     restart: unless-stopped
 
 volumes:

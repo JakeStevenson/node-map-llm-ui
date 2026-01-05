@@ -134,3 +134,18 @@ export interface ContextStatus {
   state: 'normal' | 'warning' | 'critical';
   availableTokens: number;    // Remaining tokens available
 }
+
+// Document Types
+export interface Document {
+  id: string;
+  chatId: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  filePath: string;
+  status: 'pending' | 'processing' | 'ready' | 'failed';
+  errorMessage?: string;
+  createdAt: number;
+  processedAt?: number;
+  nodeId?: string;  // null = conversation-level, string = node-level
+}

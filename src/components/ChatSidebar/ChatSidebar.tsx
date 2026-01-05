@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { sendMessageWithSearch, generateBranchSummary } from '../../services/llmService';
 import { BranchIcon, SearchIcon } from '../icons';
 import { ContextIndicator } from '../ContextIndicator';
+import DocumentUpload from '../DocumentUpload/DocumentUpload';
 import type { BranchSummary, SearchMetadata } from '../../types';
 import { useDebouncedValue } from '../../utils/debounce';
 
@@ -22,6 +23,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
   const [editedName, setEditedName] = useState('');
   const [isMerging, setIsMerging] = useState(false);
   const [searchEnabled, setSearchEnabled] = useState(false);  // Manual search toggle
+  const [showDocuments, setShowDocuments] = useState(false);  // Document panel toggle
   const [showSystemPromptDialog, setShowSystemPromptDialog] = useState<boolean>(false);
   const [editedSystemPrompt, setEditedSystemPrompt] = useState<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -500,9 +502,31 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
         </div>
       )}
 
+      {/* Document Upload Panel */}
+      {showDocuments && (
+        <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-background)]/50 max-h-96 overflow-y-auto">
+          <DocumentUpload />
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="p-4 border-t border-[var(--color-border)]">
         <div className="flex gap-2 items-stretch">
+          {/* Document toggle */}
+          <button
+            type="button"
+            onClick={() => setShowDocuments(!showDocuments)}
+            disabled={isStreaming}
+            className={`w-11 flex-shrink-0 flex items-center justify-center rounded-lg border transition-colors ${
+              showDocuments
+                ? 'bg-purple-500/15 text-purple-400 border-purple-500/40'
+                : 'bg-[var(--color-background)] text-[var(--color-text-secondary)] border-[var(--color-border)] hover:border-purple-500/40 hover:text-purple-400'
+            } disabled:opacity-50`}
+            title={showDocuments ? 'Hide documents' : 'Upload documents'}
+            aria-label={showDocuments ? 'Hide document upload' : 'Show document upload'}
+          >
+            📎
+          </button>
           {/* Search toggle - only show if server has search configured */}
           {serverSearchConfig?.enabled && (
             <button

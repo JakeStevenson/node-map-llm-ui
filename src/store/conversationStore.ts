@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Message, ConversationNode, BranchSummary, SearchMetadata, ContextStatus, SyncState, SyncError } from '../types';
+import type { Message, ConversationNode, BranchSummary, SearchMetadata, ContextStatus, SyncState, SyncError, Document } from '../types';
 import * as api from '../services/apiService';
 import { calculatePathContext, estimateTokens } from '../services/contextService';
 import { useSettingsStore } from './settingsStore';
@@ -43,6 +43,9 @@ interface ConversationState {
   isSearching: boolean;
   searchQuery: string | null;
 
+  // Document state
+  documents: Document[];
+
   // Error state
   error: string | null;
   syncState: SyncState;
@@ -84,6 +87,13 @@ interface ConversationState {
   setIsSearching: (searching: boolean, query?: string) => void;
   setError: (error: string | null) => void;
   clearSyncErrors: () => void;
+
+  // Document actions
+  uploadDocument: (file: File, nodeId?: string) => Promise<Document>;
+  loadDocuments: (chatId?: string) => Promise<void>;
+  deleteDocument: (documentId: string) => Promise<void>;
+  getConversationDocuments: () => Document[];
+  getNodeDocuments: (nodeId: string) => Document[];
 
   // Computed helpers
   getPathToNode: (nodeId: string) => ConversationNode[];
@@ -433,6 +443,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   streamingParentId: null,
   isSearching: false,
   searchQuery: null,
+  documents: [],
   error: null,
   syncState: {
     pending: [],
@@ -1418,6 +1429,98 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         lastError: null,
       },
     }));
+  },
+
+  // Document actions
+  uploadDocument: async (file, nodeId) => {
+    const { activeChatId } = get();
+    if (!activeChatId) {
+      throw new Error('No active chat');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (nodeId) {
+      formData.append('nodeId', nodeId);
+    }
+
+    const response = await fetch(`/api/documents/upload/${activeChatId}`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Upload failed');
+    }
+
+    const { document } = await response.json();
+
+    // Add to local state
+    set((state) => ({
+      documents: [...state.documents, document],
+    }));
+
+    return document;
+  },
+
+  loadDocuments: async (chatId) => {
+    const { activeChatId } = get();
+    const targetChatId = chatId || activeChatId;
+
+    if (!targetChatId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/documents/chat/${targetChatId}`);
+      if (!response.ok) {
+        throw new Error('Failed to load documents');
+      }
+
+      const { documents } = await response.json();
+      set({ documents });
+    } catch (error) {
+      console.error('Error loading documents:', error);
+      set({ error: error instanceof Error ? error.message : 'Failed to load documents' });
+    }
+  },
+
+  deleteDocument: async (documentId) => {
+    try {
+      const response = await fetch(`/api/documents/${documentId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete document');
+      }
+
+      // Remove from local state
+      set((state) => ({
+        documents: state.documents.filter((doc) => doc.id !== documentId),
+      }));
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      set({ error: error instanceof Error ? error.message : 'Failed to delete document' });
+    }
+  },
+
+  getConversationDocuments: () => {
+    const { documents } = get();
+    return documents.filter((doc) => !doc.nodeId);
+  },
+
+  getNodeDocuments: (nodeId) => {
+    const { documents, nodes } = get();
+
+    // Get all ancestor node IDs for the given node
+    const ancestorIds = new Set<string>();
+    const path = getPathToNodeHelper(nodeId, nodes);
+    path.forEach((node) => ancestorIds.add(node.id));
+
+    // Return documents attached to this node or any ancestor
+    return documents.filter((doc) => doc.nodeId && ancestorIds.has(doc.nodeId));
   },
 
   getPathToNode: (nodeId) => {

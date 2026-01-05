@@ -59,11 +59,65 @@ CREATE TABLE IF NOT EXISTS branch_summaries (
   FOREIGN KEY (node_id) REFERENCES conversation_nodes(id) ON DELETE CASCADE
 );
 
+-- Documents table (stores metadata for uploaded files)
+CREATE TABLE IF NOT EXISTS documents (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL,
+  file_path TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  error_message TEXT,
+  created_at INTEGER NOT NULL,
+  processed_at INTEGER,
+  FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+
+-- Document associations (supports both conversation-level and node-level attachments)
+CREATE TABLE IF NOT EXISTS document_associations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  node_id TEXT,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+  FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+  FOREIGN KEY (node_id) REFERENCES conversation_nodes(id) ON DELETE CASCADE,
+  UNIQUE(document_id, node_id)
+);
+
+-- Document chunks (text segments for RAG)
+CREATE TABLE IF NOT EXISTS document_chunks (
+  id TEXT PRIMARY KEY,
+  document_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  token_count INTEGER NOT NULL,
+  page_number INTEGER,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+-- Document embeddings (vector representations for semantic search)
+CREATE TABLE IF NOT EXISTS document_embeddings (
+  chunk_id TEXT PRIMARY KEY,
+  embedding BLOB NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (chunk_id) REFERENCES document_chunks(id) ON DELETE CASCADE
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_nodes_chat_id ON conversation_nodes(chat_id);
 CREATE INDEX IF NOT EXISTS idx_node_parents_node ON node_parents(node_id);
 CREATE INDEX IF NOT EXISTS idx_node_parents_parent ON node_parents(parent_id);
 CREATE INDEX IF NOT EXISTS idx_branch_summaries_node ON branch_summaries(node_id);
+CREATE INDEX IF NOT EXISTS idx_documents_chat_id ON documents(chat_id);
+CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
+CREATE INDEX IF NOT EXISTS idx_doc_assoc_chat ON document_associations(chat_id);
+CREATE INDEX IF NOT EXISTS idx_doc_assoc_node ON document_associations(node_id);
+CREATE INDEX IF NOT EXISTS idx_doc_assoc_doc ON document_associations(document_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_document ON document_chunks(document_id);
 `;
 
 db.exec(schema);
