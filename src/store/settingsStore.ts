@@ -42,7 +42,7 @@ interface SettingsState {
   fetchServerSearchConfig: () => Promise<void>;
 }
 
-const DEFAULT_ENDPOINT = 'https://api.openai.com/v1';
+const DEFAULT_ENDPOINT = '';
 
 const DEFAULT_WEB_SEARCH: WebSearchConfig = {
   enabled: false,

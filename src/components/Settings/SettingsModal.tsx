@@ -162,11 +162,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
               type="url"
               value={localEndpoint}
               onChange={(e) => setLocalEndpoint(e.target.value)}
-              placeholder="https://api.openai.com/v1"
+              placeholder="https://api.your-provider.com/v1"
               className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent"
             />
             <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
-              OpenAI-compatible endpoint (OpenAI, Ollama, etc.)
+              OpenAI-compatible API endpoint URL
             </p>
           </div>
 
@@ -187,7 +187,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
               className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent"
             />
             <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
-              Leave empty for local endpoints like Ollama
+              Optional for providers that don't require authentication
             </p>
           </div>
 
