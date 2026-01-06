@@ -50,6 +50,7 @@ function CanvasViewInner(): JSX.Element {
   const {
     nodes: conversationNodes,
     activeNodeId,
+    activeChatId,
     selectedNodeIds,
     customSummaryPrompt,
     selectNode,
@@ -68,7 +69,7 @@ function CanvasViewInner(): JSX.Element {
     setCustomSummaryPrompt,
   } = useConversationStore();
 
-  const { getContextConfig, getConfig } = useSettingsStore();
+  const { getContextConfig, getConfig, getRagConfig, getEmbeddingConfig } = useSettingsStore();
   const contextConfig = getContextConfig();
   const llmConfig = getConfig();
 
@@ -139,6 +140,10 @@ function CanvasViewInner(): JSX.Element {
           config: llmConfig,
           messages: allMessages,
           webSearchConfig: null,  // No search for variations (can be added later)
+          chatId: activeChatId ?? undefined,  // For RAG document search
+          activeNodeId: activeNodeId ?? undefined,  // Current node for path-aware search
+          ragConfig: getRagConfig(),  // RAG settings
+          embeddingConfig: getEmbeddingConfig(),  // Embedding settings
           onChunk: (chunk) => appendStreamingContent(chunk),
           onSearchStart: () => {},
           onSearchComplete: () => {},
@@ -153,7 +158,7 @@ function CanvasViewInner(): JSX.Element {
       console.error('Error editing node:', error);
       setErrorMessage('Failed to edit node. Please try again.');
     }
-  }, [editNodeAndBranch, llmConfig, getMessagesForLLM, setIsStreaming, appendStreamingContent, finalizeStreamingWithSearch, setError]);
+  }, [editNodeAndBranch, llmConfig, activeChatId, getRagConfig, getEmbeddingConfig, getMessagesForLLM, setIsStreaming, appendStreamingContent, finalizeStreamingWithSearch, setError]);
 
   // Convert conversation nodes to React Flow nodes
   const { nodes, edges } = useMemo(() => {

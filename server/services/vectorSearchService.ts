@@ -24,6 +24,41 @@ const DEFAULT_OPTIONS: Required<SearchOptions> = {
 };
 
 /**
+ * Get all node IDs in the path from root to the given node (including the node itself)
+ * Walks up the tree through parent relationships
+ */
+function getPathNodeIds(chatId: string, nodeId: string): string[] {
+  const pathNodes: string[] = [];
+  const visited = new Set<string>();
+  const queue = [nodeId];
+
+  // BFS to collect all ancestors (handles multiple parents from merges)
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+
+    if (visited.has(currentId)) {
+      continue;
+    }
+    visited.add(currentId);
+    pathNodes.push(currentId);
+
+    // Get parent IDs for this node from node_parents table
+    const parents = db.prepare(`
+      SELECT parent_id FROM node_parents
+      WHERE node_id = ?
+    `).all(currentId) as Array<{ parent_id: string }>;
+
+    parents.forEach(({ parent_id }) => {
+      if (!visited.has(parent_id)) {
+        queue.push(parent_id);
+      }
+    });
+  }
+
+  return pathNodes;
+}
+
+/**
  * Calculate cosine similarity between two vectors
  */
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
@@ -46,33 +81,60 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 
 /**
  * Search for relevant document chunks based on query
+ * Supports both conversation-level and node-level documents with path inheritance
  */
 export async function searchRelevantChunks(
   chatId: string,
   query: string,
   options: SearchOptions = {},
-  embeddingConfig?: EmbeddingConfig
+  embeddingConfig?: EmbeddingConfig,
+  nodeId?: string
 ): Promise<SearchResult[]> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
-  console.log(`Searching for: "${query}" (chatId: ${chatId})`);
+  console.log(`Searching for: "${query}" (chatId: ${chatId}, nodeId: ${nodeId || 'none'})`);
 
   // Generate query embedding
   const queryEmbedding = await embeddingService.generateEmbedding(query, embeddingConfig);
 
-  // Get all document IDs for this chat (conversation-level only for now)
-  const documentIds = db.prepare(`
-    SELECT DISTINCT document_id
-    FROM document_associations
-    WHERE chat_id = ? AND node_id IS NULL
-  `).all(chatId) as Array<{ document_id: string }>;
+  // Get applicable document IDs
+  let documentIds: Array<{ document_id: string }>;
+
+  if (nodeId) {
+    // Get all nodes in the path (current node + all ancestors)
+    const pathNodeIds = getPathNodeIds(chatId, nodeId);
+    console.log(`[RAG DEBUG] Current node: ${nodeId}`);
+    console.log(`[RAG DEBUG] Path nodes: [${pathNodeIds.join(', ')}]`);
+
+    // Get documents from all nodes in path (node-scoped only)
+    const placeholders = pathNodeIds.map(() => '?').join(',');
+    const query = `
+      SELECT DISTINCT da.document_id, da.node_id, d.file_name
+      FROM document_associations da
+      JOIN documents d ON da.document_id = d.id
+      WHERE da.chat_id = ? AND da.node_id IN (${placeholders})
+    `;
+    const docsWithNodes = db.prepare(query).all(chatId, ...pathNodeIds) as Array<{
+      document_id: string;
+      node_id: string;
+      file_name: string
+    }>;
+
+    console.log(`[RAG DEBUG] Found documents:`, JSON.stringify(docsWithNodes, null, 2));
+
+    documentIds = docsWithNodes.map(d => ({ document_id: d.document_id }));
+  } else {
+    // No active node - no documents available (all documents are node-scoped)
+    documentIds = [];
+  }
 
   if (documentIds.length === 0) {
-    console.log('No documents found for this chat');
+    console.log('No documents found for this chat/node');
     return [];
   }
 
   const docIdList = documentIds.map((d) => d.document_id);
+  console.log(`Searching ${docIdList.length} documents`);
 
   // Get all chunks and embeddings for these documents
   const placeholders = docIdList.map(() => '?').join(',');

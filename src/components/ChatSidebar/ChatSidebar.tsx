@@ -43,6 +43,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     selectedNodeIds,
     nodes,
     activeNodeId,
+    activeChatId,
     addMessage,
     createMergeNode,
     setIsStreaming,
@@ -59,6 +60,9 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     getContextStatus,
     navigateToNode,
     validateMerge,
+    waitForDocumentsReady,
+    hasProcessingDocuments,
+    loadDocuments,
   } = useConversationStore();
 
   // Get active node to check for merge summaries
@@ -67,12 +71,30 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
 
   const showMergeBar = selectedNodeIds.length >= 2;
 
-  const { endpoint, apiKey, model, webSearch, serverSearchConfig, fetchServerSearchConfig, setModel } = useSettingsStore();
+  const {
+    endpoint,
+    apiKey,
+    model,
+    webSearch,
+    serverSearchConfig,
+    fetchServerSearchConfig,
+    setModel,
+    getRagConfig,
+    getEmbeddingConfig,
+  } = useSettingsStore();
 
   // Fetch server search config on mount
   useEffect(() => {
     fetchServerSearchConfig();
   }, [fetchServerSearchConfig]);
+
+  // Load documents when chat changes
+  useEffect(() => {
+    if (activeChatId) {
+      loadDocuments(activeChatId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChatId]); // Only reload when chat ID changes, not when loadDocuments ref changes
 
   // Auto-detect context window on mount if model is set
   useEffect(() => {
@@ -157,11 +179,35 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     const trimmedInput = input.trim();
     if (!trimmedInput || isStreaming || !isConfigured) return;
 
-    // Add user message
+    // Add user message first and get the new node ID
     const userMessage = createUserMessage(trimmedInput);
-    addMessage(userMessage);
+    const newNodeId = addMessage(userMessage);
     setInput('');
     setError(null);
+
+    // Check if there's a pending document upload
+    const pendingUpload = (window as any).__pendingDocumentUpload;
+    if (pendingUpload) {
+      try {
+        console.log(`[UPLOAD] Uploading pending document to new node ${newNodeId}`);
+        await pendingUpload(newNodeId);
+      } catch (err) {
+        setError('Failed to upload document');
+        return;
+      }
+    }
+
+    // Wait for any documents to finish processing
+    if (hasProcessingDocuments()) {
+      setError('Processing documents... please wait');
+      try {
+        await waitForDocumentsReady();
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Document processing failed');
+        return;
+      }
+    }
 
     // Start streaming
     setIsStreaming(true);
@@ -182,6 +228,10 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
       messages: allMessages,
       webSearchConfig: effectiveSearchConfig,
       searchQuery: searchEnabled ? trimmedInput : undefined,  // Use user's message as query
+      chatId: activeChatId ?? undefined,  // For RAG document search
+      activeNodeId: activeNodeId ?? undefined,  // Current node for path-aware search
+      ragConfig: getRagConfig(),  // RAG settings
+      embeddingConfig: getEmbeddingConfig(),  // Embedding settings
       onChunk: (chunk) => appendStreamingContent(chunk),
       onSearchStart: (query) => setIsSearching(true, query),
       onSearchComplete: () => setIsSearching(false),
@@ -202,6 +252,12 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
     webSearch.maxResults,
     serverSearchConfig?.enabled,
     searchEnabled,
+    activeChatId,
+    activeNodeId,  // CRITICAL: Must be in dependency array to avoid stale closure
+    getRagConfig,
+    getEmbeddingConfig,
+    hasProcessingDocuments,
+    waitForDocumentsReady,
     getMessagesForLLM,
     addMessage,
     setIsStreaming,
@@ -505,7 +561,7 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
       {/* Document Upload Panel */}
       {showDocuments && (
         <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-background)]/50 max-h-96 overflow-y-auto">
-          <DocumentUpload />
+          <DocumentUpload nodeId={activeNodeId ?? undefined} />
         </div>
       )}
 

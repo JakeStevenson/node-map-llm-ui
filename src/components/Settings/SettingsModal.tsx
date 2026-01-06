@@ -16,6 +16,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     embeddingEndpoint,
     embeddingApiKey,
     embeddingModel,
+    ragEnabled,
+    ragTopK,
+    ragMaxTokens,
+    ragMinScore,
     defaultSystemPrompt,
     availableModels,
     isLoadingModels,
@@ -26,6 +30,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
     setModel,
     updateConfig,
     updateEmbeddingConfig,
+    updateRagConfig,
     setAvailableModels,
     setIsLoadingModels,
     setModelsError,
@@ -39,6 +44,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
   const [localEmbeddingEndpoint, setLocalEmbeddingEndpoint] = useState(embeddingEndpoint);
   const [localEmbeddingApiKey, setLocalEmbeddingApiKey] = useState(embeddingApiKey);
   const [localEmbeddingModel, setLocalEmbeddingModel] = useState(embeddingModel);
+  const [localRagEnabled, setLocalRagEnabled] = useState(ragEnabled);
+  const [localRagTopK, setLocalRagTopK] = useState(ragTopK);
+  const [localRagMaxTokens, setLocalRagMaxTokens] = useState(ragMaxTokens);
+  const [localRagMinScore, setLocalRagMinScore] = useState(ragMinScore);
   const [localDefaultPrompt, setLocalDefaultPrompt] = useState(defaultSystemPrompt);
 
   // Web search local state
@@ -62,12 +71,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
       setLocalEmbeddingEndpoint(embeddingEndpoint);
       setLocalEmbeddingApiKey(embeddingApiKey);
       setLocalEmbeddingModel(embeddingModel);
+      setLocalRagEnabled(ragEnabled);
+      setLocalRagTopK(ragTopK);
+      setLocalRagMaxTokens(ragMaxTokens);
+      setLocalRagMinScore(ragMinScore);
       setLocalDefaultPrompt(defaultSystemPrompt);
       setLocalSearchEnabled(webSearch.enabled);
       setLocalSearchMaxResults(webSearch.maxResults);
       setSearchTestResult(null);
     }
-  }, [isOpen, endpoint, apiKey, embeddingEndpoint, embeddingApiKey, embeddingModel, defaultSystemPrompt, webSearch]);
+  }, [isOpen, endpoint, apiKey, embeddingEndpoint, embeddingApiKey, embeddingModel, ragEnabled, ragTopK, ragMaxTokens, ragMinScore, defaultSystemPrompt, webSearch]);
 
   // Fetch models when endpoint/key changes
   const handleFetchModels = useCallback(async () => {
@@ -117,6 +130,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
       embeddingEndpoint: localEmbeddingEndpoint,
       embeddingApiKey: localEmbeddingApiKey,
       embeddingModel: localEmbeddingModel,
+    });
+    updateRagConfig({
+      ragEnabled: localRagEnabled,
+      ragTopK: localRagTopK,
+      ragMaxTokens: localRagMaxTokens,
+      ragMinScore: localRagMinScore,
     });
     setDefaultSystemPrompt(localDefaultPrompt);
     updateWebSearchConfig({
@@ -168,7 +187,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
         </div>
 
         {/* Content */}
-        <div className="px-6 py-4 space-y-4">
+        <div className="px-6 py-4 space-y-4 max-h-[calc(100vh-12rem)] overflow-y-auto">
           {/* Endpoint */}
           <div>
             <label
@@ -342,6 +361,98 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps): JSX.Elem
                 Model name for generating embeddings (e.g., nomic-embed-text, text-embedding-3-small)
               </p>
             </div>
+          </div>
+
+          {/* RAG Settings Section */}
+          <div className="pt-4 border-t border-[var(--color-border)]">
+            <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-3">
+              RAG Settings (Document Context)
+            </h3>
+
+            {/* Enable RAG Toggle */}
+            <label className="flex items-center gap-2 mb-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={localRagEnabled}
+                onChange={(e) => setLocalRagEnabled(e.target.checked)}
+                className="w-4 h-4 rounded border-[var(--color-border)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+              />
+              <span className="text-sm text-[var(--color-text-primary)]">
+                Enable document context in conversations
+              </span>
+            </label>
+
+            {localRagEnabled && (
+              <>
+                {/* Top K */}
+                <div className="mb-3">
+                  <label
+                    htmlFor="ragTopK"
+                    className="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+                  >
+                    Max Chunks (Top K): {localRagTopK}
+                  </label>
+                  <input
+                    id="ragTopK"
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={localRagTopK}
+                    onChange={(e) => setLocalRagTopK(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                    Number of document chunks to retrieve per message
+                  </p>
+                </div>
+
+                {/* Max Tokens */}
+                <div className="mb-3">
+                  <label
+                    htmlFor="ragMaxTokens"
+                    className="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+                  >
+                    Max Tokens: {localRagMaxTokens}
+                  </label>
+                  <input
+                    id="ragMaxTokens"
+                    type="range"
+                    min="500"
+                    max="5000"
+                    step="500"
+                    value={localRagMaxTokens}
+                    onChange={(e) => setLocalRagMaxTokens(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                    Maximum tokens budget for retrieved chunks
+                  </p>
+                </div>
+
+                {/* Min Score */}
+                <div>
+                  <label
+                    htmlFor="ragMinScore"
+                    className="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+                  >
+                    Minimum Similarity: {localRagMinScore.toFixed(2)}
+                  </label>
+                  <input
+                    id="ragMinScore"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={localRagMinScore}
+                    onChange={(e) => setLocalRagMinScore(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                    Minimum cosine similarity threshold (0-1)
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Web Search Section */}

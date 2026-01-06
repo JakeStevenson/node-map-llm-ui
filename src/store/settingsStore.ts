@@ -15,6 +15,12 @@ interface SettingsState {
   embeddingApiKey: string;
   embeddingModel: string;
 
+  // RAG Config
+  ragEnabled: boolean;
+  ragTopK: number;
+  ragMaxTokens: number;
+  ragMinScore: number;
+
   // Default System Prompt
   defaultSystemPrompt: string;
 
@@ -50,6 +56,14 @@ interface SettingsState {
   updateEmbeddingConfig: (config: Partial<Pick<SettingsState, 'embeddingEndpoint' | 'embeddingApiKey' | 'embeddingModel'>>) => void;
   getEmbeddingConfig: () => { endpoint: string; apiKey: string; model: string };
 
+  // RAG Actions
+  setRagEnabled: (enabled: boolean) => void;
+  setRagTopK: (topK: number) => void;
+  setRagMaxTokens: (maxTokens: number) => void;
+  setRagMinScore: (minScore: number) => void;
+  updateRagConfig: (config: Partial<Pick<SettingsState, 'ragEnabled' | 'ragTopK' | 'ragMaxTokens' | 'ragMinScore'>>) => void;
+  getRagConfig: () => { enabled: boolean; topK: number; maxTokens: number; minScore: number };
+
   // Default System Prompt Actions
   setDefaultSystemPrompt: (prompt: string) => void;
   getDefaultSystemPrompt: () => string;
@@ -76,6 +90,13 @@ const DEFAULT_ENDPOINT = '';
 const DEFAULT_EMBEDDING_ENDPOINT = 'http://localhost:11434/v1';
 const DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text';
 
+const DEFAULT_RAG_CONFIG = {
+  enabled: true,
+  topK: 5,
+  maxTokens: 2000,
+  minScore: 0.3,
+};
+
 const DEFAULT_WEB_SEARCH: WebSearchConfig = {
   enabled: false,
   provider: 'searxng',
@@ -99,6 +120,10 @@ export const useSettingsStore = create<SettingsState>()(
       embeddingEndpoint: DEFAULT_EMBEDDING_ENDPOINT,
       embeddingApiKey: '',
       embeddingModel: DEFAULT_EMBEDDING_MODEL,
+      ragEnabled: DEFAULT_RAG_CONFIG.enabled,
+      ragTopK: DEFAULT_RAG_CONFIG.topK,
+      ragMaxTokens: DEFAULT_RAG_CONFIG.maxTokens,
+      ragMinScore: DEFAULT_RAG_CONFIG.minScore,
       defaultSystemPrompt: '',
       webSearch: DEFAULT_WEB_SEARCH,
       contextConfig: DEFAULT_CONTEXT_CONFIG,
@@ -159,6 +184,19 @@ export const useSettingsStore = create<SettingsState>()(
         endpoint: get().embeddingEndpoint,
         apiKey: get().embeddingApiKey,
         model: get().embeddingModel,
+      }),
+
+      // RAG Actions
+      setRagEnabled: (enabled) => set({ ragEnabled: enabled }),
+      setRagTopK: (topK) => set({ ragTopK: topK }),
+      setRagMaxTokens: (maxTokens) => set({ ragMaxTokens: maxTokens }),
+      setRagMinScore: (minScore) => set({ ragMinScore: minScore }),
+      updateRagConfig: (config) => set(config),
+      getRagConfig: () => ({
+        enabled: get().ragEnabled,
+        topK: get().ragTopK,
+        maxTokens: get().ragMaxTokens,
+        minScore: get().ragMinScore,
       }),
 
       // Default System Prompt Actions
@@ -235,6 +273,10 @@ export const useSettingsStore = create<SettingsState>()(
         embeddingEndpoint: state.embeddingEndpoint,
         embeddingApiKey: state.embeddingApiKey,
         embeddingModel: state.embeddingModel,
+        ragEnabled: state.ragEnabled,
+        ragTopK: state.ragTopK,
+        ragMaxTokens: state.ragMaxTokens,
+        ragMinScore: state.ragMinScore,
         defaultSystemPrompt: state.defaultSystemPrompt,
         webSearch: state.webSearch,
         contextConfig: state.contextConfig,

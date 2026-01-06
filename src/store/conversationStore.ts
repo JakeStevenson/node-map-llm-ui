@@ -75,7 +75,7 @@ interface ConversationState {
   clearTree: () => void;
 
   // Legacy actions (still used by sidebar)
-  addMessage: (message: Message) => void;
+  addMessage: (message: Message) => string;  // Returns new node ID
   updateLastMessage: (content: string) => void;
   setMessages: (messages: Message[]) => void;
   clearMessages: () => void;
@@ -90,10 +90,13 @@ interface ConversationState {
 
   // Document actions
   uploadDocument: (file: File, nodeId?: string) => Promise<Document>;
+  reassociateDocument: (documentId: string, nodeId: string) => Promise<void>;
   loadDocuments: (chatId?: string) => Promise<void>;
   deleteDocument: (documentId: string) => Promise<void>;
   getConversationDocuments: () => Document[];
   getNodeDocuments: (nodeId: string) => Document[];
+  waitForDocumentsReady: () => Promise<void>;
+  hasProcessingDocuments: () => boolean;
 
   // Computed helpers
   getPathToNode: (nodeId: string) => ConversationNode[];
@@ -1335,7 +1338,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   // Legacy: Add message (creates node in tree)
   addMessage: (message) => {
     const { activeNodeId } = get();
-    get().addNode(message.role as 'user' | 'assistant', message.content, activeNodeId);
+    return get().addNode(message.role as 'user' | 'assistant', message.content, activeNodeId);
   },
 
   updateLastMessage: (content) =>
@@ -1470,6 +1473,28 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     return document;
   },
 
+  reassociateDocument: async (documentId, nodeId) => {
+    const response = await fetch(`/api/documents/${documentId}/associate`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ nodeId }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to reassociate document');
+    }
+
+    // Update local state
+    set((state) => ({
+      documents: state.documents.map((doc) =>
+        doc.id === documentId ? { ...doc, nodeId } : doc
+      ),
+    }));
+  },
+
   loadDocuments: async (chatId) => {
     const { activeChatId } = get();
     const targetChatId = chatId || activeChatId;
@@ -1527,6 +1552,40 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
     // Return documents attached to this node or any ancestor
     return documents.filter((doc) => doc.nodeId && ancestorIds.has(doc.nodeId));
+  },
+
+  hasProcessingDocuments: () => {
+    const { documents } = get();
+    return documents.some((doc) => doc.status === 'pending' || doc.status === 'processing');
+  },
+
+  waitForDocumentsReady: async () => {
+    const { activeChatId, loadDocuments } = get();
+    if (!activeChatId) return;
+
+    // Poll until all documents are ready
+    const maxAttempts = 60; // 60 seconds max
+    const pollInterval = 1000; // 1 second
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await loadDocuments(activeChatId);
+
+      const { documents } = get();
+      const hasProcessing = documents.some((doc) =>
+        doc.status === 'pending' || doc.status === 'processing'
+      );
+
+      if (!hasProcessing) {
+        // All documents are either ready or failed
+        return;
+      }
+
+      // Wait before next poll
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    }
+
+    // Timeout - throw error
+    throw new Error('Document processing timeout');
   },
 
   getPathToNode: (nodeId) => {

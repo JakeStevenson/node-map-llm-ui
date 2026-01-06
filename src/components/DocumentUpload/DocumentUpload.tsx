@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useConversationStore } from '../../store/conversationStore';
 import type { Document } from '../../types';
@@ -24,13 +24,14 @@ const MAX_SIZE = 50 * 1024 * 1024; // 50MB
 export default function DocumentUpload({ nodeId, onUploadComplete }: DocumentUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const uploadDocument = useConversationStore((state) => state.uploadDocument);
   const documents = useConversationStore((state) => state.documents);
 
-  // Filter documents based on nodeId
+  // Filter documents based on nodeId (all documents are now node-scoped)
   const relevantDocuments = nodeId
     ? documents.filter((doc) => doc.nodeId === nodeId)
-    : documents.filter((doc) => !doc.nodeId);
+    : [];
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -40,20 +41,37 @@ export default function DocumentUpload({ nodeId, onUploadComplete }: DocumentUpl
 
       const file = acceptedFiles[0]; // Handle one file at a time for MVP
 
-      setUploading(true);
+      // Store file locally - will upload when message is sent
+      setPendingFile(file);
       setError(null);
-
-      try {
-        const document = await uploadDocument(file, nodeId);
-        onUploadComplete?.(document);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Upload failed');
-      } finally {
-        setUploading(false);
-      }
     },
-    [uploadDocument, nodeId, onUploadComplete]
+    []
   );
+
+  // Expose upload function to parent
+  const uploadPendingFile = useCallback(async (targetNodeId: string) => {
+    if (!pendingFile) return null;
+
+    setUploading(true);
+    setError(null);
+
+    try {
+      const document = await uploadDocument(pendingFile, targetNodeId);
+      setPendingFile(null);
+      onUploadComplete?.(document);
+      return document;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+      throw err;
+    } finally {
+      setUploading(false);
+    }
+  }, [pendingFile, uploadDocument, onUploadComplete]);
+
+  // Store upload function in window so ChatSidebar can access it
+  useEffect(() => {
+    (window as any).__pendingDocumentUpload = pendingFile ? uploadPendingFile : null;
+  }, [pendingFile, uploadPendingFile]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -100,11 +118,33 @@ export default function DocumentUpload({ nodeId, onUploadComplete }: DocumentUpl
         </div>
       )}
 
+      {/* Pending File */}
+      {pendingFile && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-gray-700">
+            Pending Upload
+          </h3>
+          <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <span className="text-2xl">📎</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">{pendingFile.name}</p>
+              <p className="text-xs text-blue-600">Will upload when you send message</p>
+            </div>
+            <button
+              onClick={() => setPendingFile(null)}
+              className="text-red-600 hover:text-red-700 text-sm"
+            >
+              🗑️
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Document List */}
       {relevantDocuments.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-sm font-medium text-gray-700">
-            {nodeId ? 'Node Documents' : 'Conversation Documents'}
+            Documents (This Branch)
           </h3>
           <div className="space-y-2">
             {relevantDocuments.map((doc) => (

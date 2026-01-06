@@ -110,6 +110,7 @@ router.post('/upload/:chatId', upload.single('file'), async (req: Request, res: 
     `).run(documentId, chatId, req.file.originalname, req.file.mimetype, req.file.size, req.file.path, now);
 
     // Create association
+    console.log(`[UPLOAD DEBUG] Saving document ${documentId} with nodeId: ${nodeId || 'NULL'}`);
     db.prepare(`
       INSERT INTO document_associations (document_id, chat_id, node_id, created_at)
       VALUES (?, ?, ?, ?)
@@ -238,7 +239,7 @@ router.post('/:documentId/process', async (req: Request, res: Response) => {
 // POST /api/documents/search - Search for relevant chunks
 router.post('/search', async (req: Request, res: Response) => {
   try {
-    const { chatId, query, topK, maxTokens, minScore, embeddingConfig } = req.body;
+    const { chatId, query, topK, maxTokens, minScore, embeddingConfig, nodeId } = req.body;
 
     if (!chatId || !query) {
       return res.status(400).json({ error: 'chatId and query are required' });
@@ -250,7 +251,7 @@ router.post('/search', async (req: Request, res: Response) => {
     if (maxTokens !== undefined) searchOptions.maxTokens = maxTokens;
     if (minScore !== undefined) searchOptions.minScore = minScore;
 
-    const results = await searchRelevantChunks(chatId, query, searchOptions, embeddingConfig);
+    const results = await searchRelevantChunks(chatId, query, searchOptions, embeddingConfig, nodeId);
 
     res.json({ results, count: results.length });
   } catch (error) {
@@ -276,6 +277,42 @@ router.get('/:documentId/chunks', (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching document chunks:', error);
     res.status(500).json({ error: 'Failed to fetch document chunks' });
+  }
+});
+
+// PATCH /api/documents/:documentId/associate - Update document's node association
+router.patch('/:documentId/associate', (req: Request, res: Response) => {
+  try {
+    const documentId = req.params.documentId;
+    const { nodeId } = req.body;
+
+    // Verify document exists
+    const doc = db.prepare('SELECT chat_id FROM documents WHERE id = ?').get(documentId) as { chat_id: string } | undefined;
+    if (!doc) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // If nodeId provided, verify it exists and belongs to chat
+    if (nodeId) {
+      const node = db.prepare('SELECT id FROM conversation_nodes WHERE id = ? AND chat_id = ?').get(nodeId, doc.chat_id);
+      if (!node) {
+        return res.status(404).json({ error: 'Node not found or does not belong to chat' });
+      }
+    }
+
+    console.log(`[REASSOCIATE DEBUG] Moving document ${documentId} to nodeId: ${nodeId || 'NULL'}`);
+
+    // Update the document association
+    db.prepare(`
+      UPDATE document_associations
+      SET node_id = ?
+      WHERE document_id = ?
+    `).run(nodeId, documentId);
+
+    res.json({ success: true, documentId, nodeId });
+  } catch (error) {
+    console.error('Error updating document association:', error);
+    res.status(500).json({ error: 'Failed to update document association' });
   }
 });
 

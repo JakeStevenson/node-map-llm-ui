@@ -173,6 +173,10 @@ export interface StreamWithSearchOptions {
   messages: Message[];
   webSearchConfig: WebSearchConfig | null;
   searchQuery?: string;  // Explicit search query (user-provided)
+  chatId?: string;  // For RAG document search
+  activeNodeId?: string;  // Current node for path-aware document search
+  ragConfig?: { enabled: boolean; topK: number; maxTokens: number; minScore: number };
+  embeddingConfig?: { endpoint: string; apiKey?: string; model: string };
   onChunk: (content: string) => void;
   onSearchStart: (query: string) => void;
   onSearchComplete: (metadata: SearchMetadata) => void;
@@ -188,6 +192,10 @@ export async function sendMessageWithSearch(options: StreamWithSearchOptions): P
     messages,
     webSearchConfig,
     searchQuery: explicitSearchQuery,
+    chatId,
+    activeNodeId,
+    ragConfig,
+    embeddingConfig,
     onChunk,
     onSearchStart,
     onSearchComplete,
@@ -201,6 +209,48 @@ export async function sendMessageWithSearch(options: StreamWithSearchOptions): P
   let searchExecuted = false;
 
   let effectiveMessages = [...messages];
+
+  // Retrieve relevant document chunks if RAG is enabled
+  if (ragConfig?.enabled && chatId && messages.length > 0) {
+    const userQuery = messages[messages.length - 1].content;
+
+    try {
+      const response = await fetch('/api/documents/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId,
+          query: userQuery,
+          topK: ragConfig.topK,
+          maxTokens: ragConfig.maxTokens,
+          minScore: ragConfig.minScore,
+          embeddingConfig,
+          nodeId: activeNodeId,  // Include current node for path-aware search
+        }),
+      });
+
+      if (response.ok) {
+        const { results } = await response.json();
+
+        if (results && results.length > 0) {
+          // Format and prepend document context
+          const ragContext = formatRAGContext(results);
+          effectiveMessages = [
+            {
+              id: 'rag-context',
+              role: 'system',
+              content: ragContext,
+              createdAt: Date.now(),
+            },
+            ...messages,
+          ];
+        }
+      }
+    } catch (error) {
+      console.error('RAG retrieval failed:', error);
+      // Continue without RAG if it fails (don't block the conversation)
+    }
+  }
 
   // If user explicitly requested search, do it
   if (explicitSearchQuery && webSearchConfig?.enabled) {
@@ -357,6 +407,31 @@ export async function sendMessageWithSearch(options: StreamWithSearchOptions): P
   }
 
   onDone(searchMetadata);
+}
+
+// Helper to format RAG document context for LLM
+function formatRAGContext(
+  chunks: Array<{ fileName: string; content: string; score: number; chunkIndex: number }>
+): string {
+  const header = `# Relevant Document Context
+
+The following excerpts from uploaded documents may be relevant to this conversation:
+
+`;
+
+  const formattedChunks = chunks
+    .map(
+      (chunk, i) => `## Document ${i + 1}: ${chunk.fileName} (Similarity: ${chunk.score.toFixed(2)})
+${chunk.content}
+`
+    )
+    .join('\n');
+
+  const footer = `
+---
+Please use this context to inform your responses where applicable. If the documents don't contain relevant information, you may answer from your general knowledge.`;
+
+  return header + formattedChunks + footer;
 }
 
 // Helper to create typed errors
