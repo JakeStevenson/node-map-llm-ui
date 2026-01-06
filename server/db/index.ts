@@ -155,6 +155,12 @@ try {
 }
 
 try {
+  db.exec('ALTER TABLE conversation_nodes ADD COLUMN rag_tokens INTEGER');
+} catch {
+  // Column already exists, ignore error
+}
+
+try {
   db.exec('ALTER TABLE chats ADD COLUMN system_prompt TEXT');
 } catch {
   // Column already exists, ignore error

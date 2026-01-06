@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../db/index.js';
+import fs from 'fs';
 
 const router = Router();
 
@@ -45,6 +46,8 @@ interface DbNodeRow {
   searchMetadata: string | null;
   isSummary: number;
   summarizedNodeIds: string | null;
+  estimatedTokens: number | null;
+  ragTokens: number | null;
   isVariation: number;
   originalNodeId: string | null;
 }
@@ -91,7 +94,8 @@ router.get('/:id', (req: Request, res: Response) => {
     const nodes = db.prepare(`
       SELECT id, role, content, tree_id as treeId, created_at as createdAt,
              search_metadata as searchMetadata, is_summary as isSummary,
-             summarized_node_ids as summarizedNodeIds, is_variation as isVariation,
+             summarized_node_ids as summarizedNodeIds, estimated_tokens as estimatedTokens,
+             rag_tokens as ragTokens, is_variation as isVariation,
              original_node_id as originalNodeId
       FROM conversation_nodes WHERE chat_id = ?
       ORDER BY created_at
@@ -140,6 +144,8 @@ router.get('/:id', (req: Request, res: Response) => {
       searchMetadata: n.searchMetadata ? JSON.parse(n.searchMetadata) : undefined,
       isSummary: n.isSummary === 1,
       summarizedNodeIds: n.summarizedNodeIds ? JSON.parse(n.summarizedNodeIds) : undefined,
+      estimatedTokens: n.estimatedTokens || undefined,
+      ragTokens: n.ragTokens || undefined,
       isVariation: n.isVariation === 1,
       originalNodeId: n.originalNodeId || undefined,
     }));
@@ -262,7 +268,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 // POST /api/chats/:chatId/nodes - Add node to chat
 router.post('/:chatId/nodes', (req: Request, res: Response) => {
   try {
-    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main', searchMetadata, isSummary, summarizedNodeIds, isVariation, originalNodeId } = req.body;
+    const { id: providedId, role, content, parentIds = [], branchSummaries, treeId = 'main', searchMetadata, isSummary, summarizedNodeIds, estimatedTokens, ragTokens, isVariation, originalNodeId } = req.body;
     const chatId = req.params.chatId;
     // Use provided ID if given (allows frontend to maintain ID consistency)
     const id = providedId || generateId();
@@ -277,8 +283,8 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
     const insertNode = db.transaction(() => {
       // Insert node
       db.prepare(`
-        INSERT INTO conversation_nodes (id, chat_id, role, content, tree_id, created_at, search_metadata, is_summary, summarized_node_ids, is_variation, original_node_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO conversation_nodes (id, chat_id, role, content, tree_id, created_at, search_metadata, is_summary, summarized_node_ids, estimated_tokens, rag_tokens, is_variation, original_node_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         chatId,
@@ -289,6 +295,8 @@ router.post('/:chatId/nodes', (req: Request, res: Response) => {
         searchMetadata ? JSON.stringify(searchMetadata) : null,
         isSummary ? 1 : 0,
         summarizedNodeIds ? JSON.stringify(summarizedNodeIds) : null,
+        estimatedTokens || null,
+        ragTokens || null,
         isVariation ? 1 : 0,
         originalNodeId || null
       );
@@ -377,13 +385,37 @@ router.put('/:chatId/nodes/:nodeId', (req: Request, res: Response) => {
 // DELETE /api/nodes/:id - Delete a specific node
 router.delete('/nodes/:id', (req: Request, res: Response) => {
   try {
-    const result = db.prepare('DELETE FROM conversation_nodes WHERE id = ?').run(req.params.id);
+    const nodeId = req.params.id;
+
+    // Get all documents associated with this node before deletion
+    const documents = db.prepare(`
+      SELECT d.id, d.file_path
+      FROM documents d
+      INNER JOIN document_associations da ON d.id = da.document_id
+      WHERE da.node_id = ?
+    `).all(nodeId) as Array<{ id: string; file_path: string }>;
+
+    // Delete the node (CASCADE will handle document_associations)
+    const result = db.prepare('DELETE FROM conversation_nodes WHERE id = ?').run(nodeId);
 
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Node not found' });
     }
 
-    res.json({ success: true });
+    // Delete associated documents and their files
+    for (const doc of documents) {
+      // Delete file from disk
+      if (fs.existsSync(doc.file_path)) {
+        fs.unlinkSync(doc.file_path);
+        console.log(`[CLEANUP] Deleted file for document ${doc.id}`);
+      }
+
+      // Delete document record (CASCADE handles chunks and embeddings)
+      db.prepare('DELETE FROM documents WHERE id = ?').run(doc.id);
+      console.log(`[CLEANUP] Deleted document ${doc.id} associated with node ${nodeId}`);
+    }
+
+    res.json({ success: true, documentsDeleted: documents.length });
   } catch (error) {
     console.error('Error deleting node:', error);
     res.status(500).json({ error: 'Failed to delete node' });
@@ -401,6 +433,14 @@ router.delete('/:chatId/nodes', (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Chat not found' });
     }
 
+    // Get all documents associated with nodes in this chat before deletion
+    const documents = db.prepare(`
+      SELECT DISTINCT d.id, d.file_path
+      FROM documents d
+      INNER JOIN document_associations da ON d.id = da.document_id
+      WHERE da.chat_id = ? AND da.node_id IS NOT NULL
+    `).all(chatId) as Array<{ id: string; file_path: string }>;
+
     const clearNodes = db.transaction(() => {
       // Delete all nodes for this chat (cascade will handle node_parents and branch_summaries)
       db.prepare('DELETE FROM conversation_nodes WHERE chat_id = ?').run(chatId);
@@ -412,7 +452,22 @@ router.delete('/:chatId/nodes', (req: Request, res: Response) => {
 
     clearNodes();
 
-    res.json({ success: true });
+    // Delete associated documents and their files
+    let documentsDeleted = 0;
+    for (const doc of documents) {
+      // Delete file from disk
+      if (fs.existsSync(doc.file_path)) {
+        fs.unlinkSync(doc.file_path);
+        console.log(`[CLEANUP] Deleted file for document ${doc.id}`);
+      }
+
+      // Delete document record (CASCADE handles chunks and embeddings)
+      db.prepare('DELETE FROM documents WHERE id = ?').run(doc.id);
+      console.log(`[CLEANUP] Deleted document ${doc.id} from chat ${chatId}`);
+      documentsDeleted++;
+    }
+
+    res.json({ success: true, documentsDeleted });
   } catch (error) {
     console.error('Error clearing chat nodes:', error);
     res.status(500).json({ error: 'Failed to clear chat nodes' });

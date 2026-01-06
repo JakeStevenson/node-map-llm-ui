@@ -62,7 +62,7 @@ interface ConversationState {
   setCustomSummaryPrompt: (prompt: string) => void;
 
   // Tree Actions
-  addNode: (role: 'user' | 'assistant', content: string, parentId: string | null, searchMetadata?: SearchMetadata) => string;
+  addNode: (role: 'user' | 'assistant', content: string, parentId: string | null, searchMetadata?: SearchMetadata, ragTokens?: number) => string;
   createMergeNode: (parentIds: string[], branchSummaries?: BranchSummary[]) => string | null;
   createSummaryNode: (nodeId: string, summaryContent?: string) => Promise<string | null>;
   updateNodeContent: (nodeId: string, newContent: string) => Promise<void>;
@@ -83,7 +83,7 @@ interface ConversationState {
   setStreamingContent: (content: string) => void;
   appendStreamingContent: (chunk: string) => void;
   finalizeStreaming: () => void;
-  finalizeStreamingWithSearch: (searchMetadata?: SearchMetadata) => void;
+  finalizeStreamingWithSearch: (searchMetadata?: SearchMetadata, ragTokens?: number) => void;
   setIsSearching: (searching: boolean, query?: string) => void;
   setError: (error: string | null) => void;
   clearSyncErrors: () => void;
@@ -743,7 +743,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   },
 
   // Add a node to the tree
-  addNode: (role, content, parentId, searchMetadata) => {
+  addNode: (role, content, parentId, searchMetadata, ragTokens) => {
     const id = generateId();
     const node: ConversationNode = {
       id,
@@ -754,6 +754,7 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       treeId: 'main',
       searchMetadata,
       estimatedTokens: estimateTokens(content), // Cache token count
+      ragTokens: ragTokens || undefined, // RAG context tokens used
     };
 
     const { nodes, chats, activeChatId, chatName } = get();
@@ -1404,10 +1405,10 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
     }
   },
 
-  finalizeStreamingWithSearch: (searchMetadata) => {
+  finalizeStreamingWithSearch: (searchMetadata, ragTokens) => {
     const { streamingContent, streamingParentId } = get();
     if (streamingContent) {
-      get().addNode('assistant', streamingContent, streamingParentId, searchMetadata);
+      get().addNode('assistant', streamingContent, streamingParentId, searchMetadata, ragTokens);
       set({
         streamingContent: '',
         isStreaming: false,

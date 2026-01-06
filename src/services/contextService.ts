@@ -11,12 +11,15 @@ export function estimateTokens(text: string): number {
 
 /**
  * Calculate total token count for a path of conversation nodes
+ * Includes both the content tokens and any RAG context tokens
  */
 export function calculatePathTokens(nodes: ConversationNode[]): number {
   return nodes.reduce((total, node) => {
     // Use cached token count if available, otherwise calculate
-    const tokens = node.estimatedTokens ?? estimateTokens(node.content);
-    return total + tokens;
+    const contentTokens = node.estimatedTokens ?? estimateTokens(node.content);
+    // Add RAG tokens if this node used RAG context
+    const ragTokens = node.ragTokens ?? 0;
+    return total + contentTokens + ragTokens;
   }, 0);
 }
 

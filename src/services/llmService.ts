@@ -1,5 +1,6 @@
 import type { LLMConfig, LLMModel, LLMError, Message, SearchMetadata, WebSearchConfig } from '../types';
 import { executeSearch, formatSearchResultsForLLM } from './searchService';
+import { estimateTokens } from './contextService';
 
 // Fetch available models from the endpoint
 export async function fetchModels(config: LLMConfig): Promise<LLMModel[]> {
@@ -180,7 +181,7 @@ export interface StreamWithSearchOptions {
   onChunk: (content: string) => void;
   onSearchStart: (query: string) => void;
   onSearchComplete: (metadata: SearchMetadata) => void;
-  onDone: (searchMetadata?: SearchMetadata) => void;
+  onDone: (searchMetadata?: SearchMetadata, ragTokens?: number) => void;
   onError: (error: LLMError) => void;
   abortSignal?: AbortSignal;
 }
@@ -207,6 +208,7 @@ export async function sendMessageWithSearch(options: StreamWithSearchOptions): P
   let accumulatedContent = '';
   let searchMetadata: SearchMetadata | undefined;
   let searchExecuted = false;
+  let ragTokens = 0;
 
   let effectiveMessages = [...messages];
 
@@ -235,6 +237,7 @@ export async function sendMessageWithSearch(options: StreamWithSearchOptions): P
         if (results && results.length > 0) {
           // Format and prepend document context
           const ragContext = formatRAGContext(results);
+          ragTokens = estimateTokens(ragContext);
           effectiveMessages = [
             {
               id: 'rag-context',
@@ -406,7 +409,7 @@ export async function sendMessageWithSearch(options: StreamWithSearchOptions): P
     }
   }
 
-  onDone(searchMetadata);
+  onDone(searchMetadata, ragTokens > 0 ? ragTokens : undefined);
 }
 
 // Helper to format RAG document context for LLM

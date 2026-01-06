@@ -68,6 +68,7 @@ export interface ConversationNode {
   summarizedNodeIds?: string[];        // Original nodes this summary replaces
   excludeFromContext?: boolean;        // Skip when building LLM context
   estimatedTokens?: number;            // Cached token count
+  ragTokens?: number;                  // RAG context tokens used for this response
   isVariation?: boolean;               // Flag for variation branches (edited and branched)
   originalNodeId?: string;             // Reference to the original node this is a variation of
 }

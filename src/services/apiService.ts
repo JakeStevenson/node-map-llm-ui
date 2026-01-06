@@ -32,6 +32,8 @@ export interface CreateNodeRequest {
   searchMetadata?: SearchMetadata;
   isSummary?: boolean;
   summarizedNodeIds?: string[];
+  estimatedTokens?: number;
+  ragTokens?: number;
   isVariation?: boolean;
   originalNodeId?: string;
 }

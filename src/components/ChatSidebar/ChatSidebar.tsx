@@ -235,8 +235,8 @@ export function ChatSidebar({ className = '', style, onOpenSettings, onOpenChats
       onChunk: (chunk) => appendStreamingContent(chunk),
       onSearchStart: (query) => setIsSearching(true, query),
       onSearchComplete: () => setIsSearching(false),
-      onDone: (searchMetadata) => {
-        finalizeStreamingWithSearch(searchMetadata);
+      onDone: (searchMetadata, ragTokens) => {
+        finalizeStreamingWithSearch(searchMetadata, ragTokens);
         setSearchEnabled(false);  // Reset toggle after send
       },
       onError: (err) => setError(err.message),
