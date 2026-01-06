@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
-    "@xyflow/react": "^12.5.1",
+    "@xyflow/react": "^12.10.0",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "dagre": "^0.8.5",
