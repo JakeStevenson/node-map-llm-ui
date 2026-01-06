@@ -53,6 +53,7 @@ function CanvasViewInner(): JSX.Element {
     activeChatId,
     selectedNodeIds,
     customSummaryPrompt,
+    documents,
     selectNode,
     toggleNodeSelection,
     clearNodeSelection,
@@ -233,6 +234,7 @@ function CanvasViewInner(): JSX.Element {
           isSelected: selectedNodeIds.includes(node.id),
           childCount: childCounts.get(node.id) || 0,
           hasSearchMetadata: !!node.searchMetadata,
+          hasDocuments: documents.some((doc) => doc.nodeId === node.id),
           contextPercentage,
           isVariation: node.isVariation || false,
           onEdit: (newContent: string, shouldBranch: boolean) => handleEditNode(node.id, newContent, shouldBranch),
@@ -265,7 +267,7 @@ function CanvasViewInner(): JSX.Element {
 
     // Apply Dagre layout
     return getLayoutedElements(flowNodes, flowEdges);
-  }, [conversationNodes, activeNodeId, activePathIds, selectedNodeIds, nodeContextMap, handleEditNode]);
+  }, [conversationNodes, activeNodeId, activePathIds, selectedNodeIds, nodeContextMap, documents, handleEditNode]);
 
   // Auto-pan only when NEW nodes are added (not when navigating to existing nodes)
   // Preserves current zoom level

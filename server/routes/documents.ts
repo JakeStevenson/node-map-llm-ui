@@ -168,10 +168,8 @@ router.get('/chat/:chatId', (req: Request, res: Response) => {
     if (nodeId) {
       query += ' AND da.node_id = ?';
       params.push(nodeId);
-    } else {
-      // If no nodeId specified, only return conversation-level documents
-      query += ' AND da.node_id IS NULL';
     }
+    // If no nodeId specified, return ALL documents for this chat
 
     query += ' ORDER BY d.created_at DESC';
 

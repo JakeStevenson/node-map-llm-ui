@@ -11,6 +11,7 @@ export interface ConversationNodeData extends Record<string, unknown> {
   isSelected: boolean;  // Multi-select for merge feature
   childCount: number;
   hasSearchMetadata: boolean;  // Whether web search was used for this response
+  hasDocuments: boolean;  // Whether documents are attached to this node
   contextPercentage?: number;  // Context usage percentage for this path
   onEdit?: (newContent: string, shouldBranch: boolean) => void;  // Callback for editing
   isVariation?: boolean;  // Whether this is a variation branch
@@ -19,7 +20,7 @@ export interface ConversationNodeData extends Record<string, unknown> {
 export type ConversationNodeType = Node<ConversationNodeData, 'conversation'>;
 
 function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNodeType>): JSX.Element {
-  const { role, content, isActive, isOnActivePath, isSelected, childCount, hasSearchMetadata, contextPercentage, onEdit } = data;
+  const { role, content, isActive, isOnActivePath, isSelected, childCount, hasSearchMetadata, hasDocuments, contextPercentage, onEdit } = data;
   const isUser = role === 'user';
   const hasChildren = childCount > 0;
 
@@ -132,6 +133,16 @@ function ConversationNodeComponent({ data, selected }: NodeProps<ConversationNod
           /* Normal display */
           <div className="break-words leading-snug line-clamp-3">
             <MarkdownContent content={displayContent} />
+          </div>
+        )}
+
+        {/* Document indicator badge */}
+        {hasDocuments && (
+          <div
+            className="absolute -top-1.5 -left-1.5 p-1 bg-green-500 rounded-full shadow-sm"
+            title="Documents attached"
+          >
+            <span className="text-white text-[10px]">📎</span>
           </div>
         )}
 
