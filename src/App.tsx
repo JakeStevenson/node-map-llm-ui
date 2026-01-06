@@ -3,6 +3,7 @@ import { CanvasView } from './components/Canvas';
 import { ChatSidebar } from './components/ChatSidebar';
 import { SettingsModal } from './components/Settings';
 import { ChatsModal } from './components/Chats';
+import { NewChatDialog } from './components/NewChatDialog';
 import { SyncErrorNotification } from './components/SyncErrorNotification';
 import { useConversationStore, hasPendingSyncs } from './store/conversationStore';
 
@@ -46,6 +47,7 @@ export default function App(): JSX.Element {
   );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isChatsOpen, setIsChatsOpen] = useState(false);
+  const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(getSavedSidebarWidth);
   const [isResizing, setIsResizing] = useState(false);
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -53,6 +55,7 @@ export default function App(): JSX.Element {
   // Store initialization
   const isInitialized = useConversationStore((state) => state.isInitialized);
   const isLoading = useConversationStore((state) => state.isLoading);
+  const chats = useConversationStore((state) => state.chats);
   const initFromApi = useConversationStore((state) => state.initFromApi);
 
   // Initialize store from API on mount
@@ -61,6 +64,13 @@ export default function App(): JSX.Element {
       initFromApi();
     }
   }, [isInitialized, isLoading, initFromApi]);
+
+  // Auto-open NewChatDialog when initialized with no chats
+  useEffect(() => {
+    if (isInitialized && chats.length === 0 && !isNewChatOpen) {
+      setIsNewChatOpen(true);
+    }
+  }, [isInitialized, chats.length, isNewChatOpen]);
 
   useEffect(() => {
     const handleResize = (): void => {
@@ -148,6 +158,15 @@ export default function App(): JSX.Element {
     setIsChatsOpen(false);
   }, []);
 
+  const handleOpenNewChat = useCallback(() => {
+    setIsChatsOpen(false);
+    setIsNewChatOpen(true);
+  }, []);
+
+  const handleCloseNewChat = useCallback(() => {
+    setIsNewChatOpen(false);
+  }, []);
+
   if (!isDesktop) {
     return <DesktopRequiredMessage />;
   }
@@ -196,7 +215,10 @@ export default function App(): JSX.Element {
       <SettingsModal isOpen={isSettingsOpen} onClose={handleCloseSettings} />
 
       {/* Chats Modal */}
-      <ChatsModal isOpen={isChatsOpen} onClose={handleCloseChats} />
+      <ChatsModal isOpen={isChatsOpen} onClose={handleCloseChats} onOpenNewChat={handleOpenNewChat} />
+
+      {/* New Chat Dialog */}
+      <NewChatDialog isOpen={isNewChatOpen} onClose={handleCloseNewChat} />
 
       {/* Sync Error Notification */}
       <SyncErrorNotification />

@@ -461,27 +461,18 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
       const chatSummaries = await api.fetchChats();
 
       if (chatSummaries.length === 0) {
-        // No chats exist, create a new one
-        const newChat = await api.createChat('Untitled');
-        markChatAsSynced(newChat.id); // Mark as known on server
+        // No chats exist, initialize with empty state
+        // The UI will show the New Chat Dialog
         set({
-          chats: [{
-            id: newChat.id,
-            name: newChat.name,
-            systemPrompt: newChat.systemPrompt,
-            customSummaryPrompt: newChat.customSummaryPrompt,
-            nodes: [],
-            activeNodeId: null,
-            createdAt: newChat.createdAt,
-          }],
-          activeChatId: newChat.id,
+          chats: [],
+          activeChatId: null,
           nodes: [],
           activeNodeId: null,
           selectedNodeId: null,
           messages: [],
-          chatName: 'Untitled',
-          chatSystemPrompt: newChat.systemPrompt,
-          customSummaryPrompt: newChat.customSummaryPrompt,
+          chatName: '',
+          chatSystemPrompt: undefined,
+          customSummaryPrompt: undefined,
           isLoading: false,
           isInitialized: true,
         });

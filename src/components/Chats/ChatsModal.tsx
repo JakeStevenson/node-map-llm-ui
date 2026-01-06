@@ -1,26 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useConversationStore } from '../../store/conversationStore';
-import { useSettingsStore } from '../../store/settingsStore';
 
 interface ChatsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenNewChat: () => void;
 }
 
-export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | null {
+export function ChatsModal({ isOpen, onClose, onOpenNewChat }: ChatsModalProps): JSX.Element | null {
   const {
     chats,
     activeChatId,
-    createChat,
     switchChat,
     deleteChat,
   } = useConversationStore();
-
-  const { getDefaultSystemPrompt } = useSettingsStore();
-
-  const [showNewChatDialog, setShowNewChatDialog] = useState(false);
-  const [newChatName, setNewChatName] = useState('');
-  const [newChatPrompt, setNewChatPrompt] = useState('');
 
   // Handle key press for modal
   useEffect(() => {
@@ -33,25 +26,14 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-
-  const handleNewChat = () => {
-    setNewChatName('');
-    setNewChatPrompt(getDefaultSystemPrompt());
-    setShowNewChatDialog(true);
-  };
-
-  const handleCreateChat = async () => {
-    const name = newChatName.trim() || 'Untitled';
-    try {
-      await createChat(name, newChatPrompt.trim() || undefined);
-      setShowNewChatDialog(false);
-      onClose();
-    } catch (error) {
-      console.error('Failed to create chat:', error);
-      // Don't close dialog on error so user can retry
+  // Auto-open New Chat Dialog when modal opens with no chats
+  useEffect(() => {
+    if (isOpen && chats.length === 0) {
+      onOpenNewChat();
     }
-  };
+  }, [isOpen, chats.length, onOpenNewChat]);
+
+  if (!isOpen) return null;
 
   const handleSwitchChat = async (chatId: string) => {
     try {
@@ -64,11 +46,12 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
 
   const handleDeleteChat = (e: React.MouseEvent, chatId: string) => {
     e.stopPropagation();
-    if (chats.length === 1) {
-      // Don't delete the last chat
-      return;
-    }
     deleteChat(chatId);
+
+    // If this was the last chat, close modal and show New Chat Dialog
+    if (chats.length === 1) {
+      onOpenNewChat();
+    }
   };
 
   // Sort chats by creation date (newest first)
@@ -100,7 +83,7 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
           </h2>
           <button
             type="button"
-            onClick={handleNewChat}
+            onClick={onOpenNewChat}
             className="px-3 py-1.5 text-sm font-medium text-white bg-[var(--color-accent)] rounded-lg hover:opacity-90 transition-opacity"
           >
             + New Chat
@@ -138,8 +121,7 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
                         {chat.nodes.length} messages • {formatDate(chat.createdAt)}
                       </p>
                     </div>
-                    {chats.length > 1 && (
-                      <button
+                    <button
                         type="button"
                         onClick={(e) => handleDeleteChat(e, chat.id)}
                         className="p-1.5 text-[var(--color-text-secondary)] hover:text-[var(--color-error)] rounded transition-colors flex-shrink-0"
@@ -151,7 +133,6 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
                           <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
                         </svg>
                       </button>
-                    )}
                   </button>
                 </li>
               ))}
@@ -169,60 +150,6 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
             Close
           </button>
         </div>
-
-        {/* New Chat Dialog */}
-        {showNewChatDialog && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-xl">
-            <div className="bg-[var(--color-surface)] rounded-lg p-6 w-full max-w-sm m-4 border border-[var(--color-border)]">
-              <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">
-                New Chat
-              </h3>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
-                    Chat Name
-                  </label>
-                  <input
-                    type="text"
-                    value={newChatName}
-                    onChange={(e) => setNewChatName(e.target.value)}
-                    placeholder="Untitled"
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
-                    System Prompt (Optional)
-                  </label>
-                  <textarea
-                    value={newChatPrompt}
-                    onChange={(e) => setNewChatPrompt(e.target.value)}
-                    placeholder="You are a helpful assistant..."
-                    rows={4}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] resize-y"
-                  />
-                </div>
-
-                <div className="flex gap-2 justify-end">
-                  <button
-                    onClick={() => setShowNewChatDialog(false)}
-                    className="px-4 py-2 text-sm font-medium text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-background)]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleCreateChat}
-                    className="px-4 py-2 text-sm font-medium text-white bg-[var(--color-accent)] rounded-lg hover:opacity-90"
-                  >
-                    Create
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
