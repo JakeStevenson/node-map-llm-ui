@@ -54,8 +54,8 @@ interface ConversationState {
   initFromApi: () => Promise<void>;
 
   // Chat management actions
-  createChat: (name?: string, systemPrompt?: string) => void;
-  switchChat: (chatId: string) => void;
+  createChat: (name?: string, systemPrompt?: string) => Promise<void>;
+  switchChat: (chatId: string) => Promise<void>;
   deleteChat: (chatId: string) => void;
   renameChat: (name: string) => void;
   updateSystemPrompt: (systemPrompt: string) => void;
@@ -499,8 +499,8 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
         const chats: Chat[] = chatSummaries.map((c) => ({
           id: c.id,
           name: c.name,
-          systemPrompt: c.id === mostRecentId ? chatDetail.systemPrompt : undefined,
-          customSummaryPrompt: c.id === mostRecentId ? chatDetail.customSummaryPrompt : undefined,
+          systemPrompt: c.id === mostRecentId ? chatDetail.systemPrompt : c.systemPrompt,
+          customSummaryPrompt: c.id === mostRecentId ? chatDetail.customSummaryPrompt : c.customSummaryPrompt,
           nodes: c.id === mostRecentId ? chatDetail.nodes : [],
           activeNodeId: c.id === mostRecentId ? chatDetail.activeNodeId : null,
           createdAt: c.createdAt,
@@ -544,34 +544,49 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
   },
 
   // Create a new chat
-  createChat: (name = 'Untitled', systemPrompt?: string) => {
+  createChat: async (name = 'Untitled', systemPrompt?: string) => {
     const { chats } = get();
-    const newChat = createNewChatLocal(name, systemPrompt);
 
-    set({
-      chats: [...chats, newChat],
-      activeChatId: newChat.id,
-      nodes: [],
-      activeNodeId: null,
-      selectedNodeId: null,
-      selectedNodeIds: [],
-      messages: [],
-      chatName: name,
-      chatSystemPrompt: systemPrompt,
-      error: null,
-    });
+    // Set loading state
+    set({ isLoading: true });
 
-    // Sync to API in background
-    syncInBackground(newChat.id, 'chat', async () => {
+    try {
+      // Create chat on server FIRST
       const created = await api.createChat(name, systemPrompt);
-      // Update local ID with server ID
-      set((state) => ({
-        chats: state.chats.map((c) =>
-          c.id === newChat.id ? { ...c, id: created.id, systemPrompt: created.systemPrompt } : c
-        ),
-        activeChatId: state.activeChatId === newChat.id ? created.id : state.activeChatId,
-      }));
-    });
+
+      // Mark chat as synced
+      markChatAsSynced(created.id);
+
+      // Now add to local state with server ID
+      const newChat: Chat = {
+        id: created.id,
+        name: created.name,
+        systemPrompt: created.systemPrompt,
+        customSummaryPrompt: created.customSummaryPrompt,
+        nodes: [],
+        activeNodeId: null,
+        createdAt: created.createdAt,
+      };
+
+      set({
+        chats: [...chats, newChat],
+        activeChatId: created.id,
+        nodes: [],
+        activeNodeId: null,
+        selectedNodeId: null,
+        selectedNodeIds: [],
+        messages: [],
+        chatName: created.name,
+        chatSystemPrompt: created.systemPrompt,
+        customSummaryPrompt: created.customSummaryPrompt,
+        isLoading: false,
+        error: null,
+      });
+    } catch (error) {
+      console.error('[createChat] Failed to create chat:', error);
+      set({ isLoading: false, error: 'Failed to create chat' });
+      throw error;
+    }
   },
 
   // Switch to a different chat
@@ -759,49 +774,24 @@ export const useConversationStore = create<ConversationState>()((set, get) => ({
 
     const { nodes, chats, activeChatId, chatName } = get();
 
-    // If no active chat, create one
+    // If no active chat, attempt recovery
     if (!activeChatId) {
-      const newChat = createNewChatLocal();
-      newChat.nodes = [node];
-      newChat.activeNodeId = id;
-
-      const path = getPathToNodeHelper(id, [node]);
-
-      set({
-        chats: [newChat],
-        activeChatId: newChat.id,
-        nodes: [node],
-        activeNodeId: id,
-        selectedNodeId: id,
-        selectedNodeIds: [],
-        messages: buildMessagesFromPath(path),
-        chatName: newChat.name,
-        error: null,
-      });
-
-      // Sync: create chat then add node
-      syncInBackground(id, 'node', async () => {
-        const created = await api.createChat(newChat.name);
-
-        // Update local state with server ID
-        set((state) => ({
-          chats: state.chats.map((c) =>
-            c.id === newChat.id ? { ...c, id: created.id } : c
-          ),
-          activeChatId: state.activeChatId === newChat.id ? created.id : state.activeChatId,
-        }));
-
-        await api.createNode(created.id, {
-          id,
-          role,
-          content,
-          parentIds: parentId ? [parentId] : [],
-          searchMetadata,
+      // If we have chats but no active one, use the first chat
+      if (chats.length > 0) {
+        const firstChat = chats[0];
+        set({
+          activeChatId: firstChat.id,
+          chatName: firstChat.name,
+          chatSystemPrompt: firstChat.systemPrompt,
+          nodes: firstChat.nodes,
+          activeNodeId: firstChat.activeNodeId
         });
-        await api.updateChat(created.id, { activeNodeId: id });
-      });
+        // Retry the addNode call with the recovered state
+        return get().addNode(role, content, parentId, searchMetadata, ragTokens);
+      }
 
-      return id;
+      set({ error: 'No active chat. Please create a new chat first.' });
+      throw new Error('Cannot add node without an active chat');
     }
 
     const newNodes = [...nodes, node];

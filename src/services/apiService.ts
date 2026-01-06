@@ -9,6 +9,8 @@ export interface ChatSummary {
   createdAt: number;
   updatedAt: number;
   nodeCount: number;
+  systemPrompt?: string;
+  customSummaryPrompt?: string;
 }
 
 export interface ChatDetail {

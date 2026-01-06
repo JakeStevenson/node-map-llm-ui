@@ -62,6 +62,7 @@ router.get('/', (_req: Request, res: Response) => {
   try {
     const chats = db.prepare(`
       SELECT c.id, c.name, c.created_at as createdAt, c.updated_at as updatedAt,
+             c.system_prompt as systemPrompt, c.custom_summary_prompt as customSummaryPrompt,
              COUNT(n.id) as nodeCount
       FROM chats c
       LEFT JOIN conversation_nodes n ON n.chat_id = c.id

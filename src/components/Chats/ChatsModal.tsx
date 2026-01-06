@@ -41,16 +41,25 @@ export function ChatsModal({ isOpen, onClose }: ChatsModalProps): JSX.Element | 
     setShowNewChatDialog(true);
   };
 
-  const handleCreateChat = () => {
+  const handleCreateChat = async () => {
     const name = newChatName.trim() || 'Untitled';
-    createChat(name, newChatPrompt.trim() || undefined);
-    setShowNewChatDialog(false);
-    onClose();
+    try {
+      await createChat(name, newChatPrompt.trim() || undefined);
+      setShowNewChatDialog(false);
+      onClose();
+    } catch (error) {
+      console.error('Failed to create chat:', error);
+      // Don't close dialog on error so user can retry
+    }
   };
 
-  const handleSwitchChat = (chatId: string) => {
-    switchChat(chatId);
-    onClose();
+  const handleSwitchChat = async (chatId: string) => {
+    try {
+      await switchChat(chatId);
+      onClose();
+    } catch (error) {
+      console.error('Failed to switch chat:', error);
+    }
   };
 
   const handleDeleteChat = (e: React.MouseEvent, chatId: string) => {
